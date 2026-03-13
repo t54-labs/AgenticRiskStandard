@@ -1,4 +1,4 @@
-# Agentic Risk Standard (ARS)
+# Agentic Risk Standard
 
 A settlement-layer protocol for trustworthy AI agent services. ARS provides cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks.
 
