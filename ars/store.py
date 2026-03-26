@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Optional
 
-from .models import Event, EventType, SignedActionEnvelope
+from .models import Event, SignedActionEnvelope
 
 
 _SCHEMA = """
@@ -57,7 +57,7 @@ class EventStore:
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 envelope.job_id,
-                envelope.type.value,
+                envelope.type,
                 envelope.agreement_hash,
                 json.dumps(envelope.payload),
                 envelope.actor,
@@ -80,7 +80,7 @@ class EventStore:
             Event(
                 event_id=r["event_id"],
                 job_id=r["job_id"],
-                event_type=EventType(r["event_type"]),
+                event_type=r["event_type"],
                 agreement_hash=r["agreement_hash"],
                 payload=json.loads(r["payload"]),
                 actor=r["actor"],

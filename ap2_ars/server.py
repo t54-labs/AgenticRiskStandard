@@ -14,13 +14,13 @@ from ars.crypto import (
     verify_envelope_signature,
 )
 from ars.errors import AuthError, BadRequestError, ConflictError, NotFoundError
+from ars.models import CreateJobRequest, SignedActionEnvelope
+from ars.store import EventStore
 
 from .constraints import ConstraintEngine
 from .models import (
     AP2AgreementDraft,
-    AP2CreateJobRequest,
     AP2EventType,
-    AP2SignedActionEnvelope,
     CartMandate,
     IntentMandate,
     Modality,
@@ -28,7 +28,6 @@ from .models import (
 from .roles import RoleRegistry
 from .settlement import MockSettlementLayer, SettlementLayer
 from .state import derive_ap2_job_state, validate_ap2_transition
-from .store import AP2EventStore
 
 
 # ── App factory ──────────────────────────────────────────────────────────────
@@ -39,7 +38,7 @@ def create_app(
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        application.state.store = AP2EventStore(db_path=db_path)
+        application.state.store = EventStore(db_path=db_path)
         application.state.settlement = settlement or MockSettlementLayer()
         application.state.constraint_engine = ConstraintEngine()
         yield
@@ -51,7 +50,7 @@ def create_app(
     return application
 
 
-def _store(request: Request) -> AP2EventStore:
+def _store(request: Request) -> EventStore:
     return request.app.state.store
 
 
@@ -66,7 +65,7 @@ def _constraint_engine(request: Request) -> ConstraintEngine:
 # ── Sig verification ─────────────────────────────────────────────────────────
 
 
-def _verify_sig(envelope: AP2SignedActionEnvelope) -> None:
+def _verify_sig(envelope: SignedActionEnvelope) -> None:
     body = envelope_body(envelope.model_dump())
     if not verify_envelope_signature(envelope.actor, body, envelope.signature):
         raise AuthError()
@@ -76,9 +75,9 @@ def _verify_sig(envelope: AP2SignedActionEnvelope) -> None:
 
 
 def _append_validated(
-    store: AP2EventStore,
+    store: EventStore,
     job_id: str,
-    envelope: AP2SignedActionEnvelope,
+    envelope: SignedActionEnvelope,
     expected_type: str,
     extra_payload: dict | None = None,
 ) -> dict:
@@ -89,7 +88,7 @@ def _append_validated(
     _verify_sig(envelope)
     envelope = envelope.model_copy(update={"job_id": job_id})
 
-    events = store.get_ap2_events(job_id)
+    events = store.get_events(job_id)
     state = derive_ap2_job_state(events)
     validate_ap2_transition(state, envelope)
 
@@ -97,9 +96,9 @@ def _append_validated(
         payload = {**envelope.payload, **extra_payload}
         envelope = envelope.model_copy(update={"payload": payload})
 
-    store.append_ap2_event(envelope)
+    store.append_event(envelope)
 
-    events = store.get_ap2_events(job_id)
+    events = store.get_events(job_id)
     new_state = derive_ap2_job_state(events)
     return new_state
 
@@ -109,7 +108,7 @@ def _append_validated(
 
 def _register_base_routes(application: FastAPI) -> None:
     @application.post("/jobs", status_code=201)
-    async def create_job(req: AP2CreateJobRequest, request: Request):
+    async def create_job(req: CreateJobRequest, request: Request):
         if req.type != "JOB_CREATED":
             raise BadRequestError("Expected type JOB_CREATED")
 
@@ -138,7 +137,7 @@ def _register_base_routes(application: FastAPI) -> None:
         agr_hash = compute_agreement_hash(agreement_dict)
         job_id = str(uuid.uuid4())
 
-        storage_envelope = AP2SignedActionEnvelope(
+        storage_envelope = SignedActionEnvelope(
             type=AP2EventType.JOB_CREATED.value,
             job_id=job_id,
             agreement_hash=agr_hash,
@@ -150,7 +149,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
         store = _store(request)
         store.create_job(job_id, req.timestamp)
-        store.append_ap2_event(storage_envelope)
+        store.append_event(storage_envelope)
 
         return {
             "job_id": job_id,
@@ -161,7 +160,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/proposals")
     async def propose_agreement(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -182,16 +181,16 @@ def _register_base_routes(application: FastAPI) -> None:
             update={"job_id": job_id, "agreement_hash": agr_hash},
         )
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
         return {"job_id": job_id, "agreement_hash": agr_hash}
 
     @application.post("/jobs/{job_id}/signatures")
     async def sign_agreement(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -208,7 +207,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/fee/lock")
     async def lock_fee(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -220,7 +219,7 @@ def _register_base_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -236,7 +235,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
         payload = {**envelope.payload, "lock_ref": lock_result.ref}
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
 
         return {
             "job_id": job_id,
@@ -246,7 +245,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/deliverable")
     async def submit_deliverable(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -268,7 +267,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/evaluate")
     async def evaluate_outcome(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -290,7 +289,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/fee/settle")
     async def settle_fee(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -304,7 +303,7 @@ def _register_base_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -317,9 +316,9 @@ def _register_base_routes(application: FastAPI) -> None:
 
         payload = {**envelope.payload, "settlement_ref": result.ref}
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         new_state = derive_ap2_job_state(events)
         return {
             "job_id": job_id,
@@ -336,7 +335,7 @@ def _register_base_routes(application: FastAPI) -> None:
         store = _store(request)
         if not store.job_exists(job_id):
             raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         return state.model_dump()
 
@@ -345,14 +344,14 @@ def _register_base_routes(application: FastAPI) -> None:
         store = _store(request)
         if not store.job_exists(job_id):
             raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         return {"job_id": job_id, "events": [e.model_dump() for e in events]}
 
     # UW / Principal track endpoints
 
     @application.post("/jobs/{job_id}/uw/request")
     async def request_uw(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -369,7 +368,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/uw/decide")
     async def uw_decide(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -389,7 +388,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/uw/premium")
     async def pay_premium(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -410,7 +409,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/uw/collateral/lock")
     async def lock_collateral(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -421,7 +420,7 @@ def _register_base_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -446,12 +445,12 @@ def _register_base_routes(application: FastAPI) -> None:
             "collateral_ref": lock_result.ref,
         }
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
         return {"job_id": job_id, "collateral_ref": lock_result.ref}
 
     @application.post("/jobs/{job_id}/uw/collateral/refuse")
     async def refuse_collateral(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -468,7 +467,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/uw/override")
     async def override_decision(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -488,7 +487,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/release/approve")
     async def approve_release(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -505,7 +504,7 @@ def _register_base_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/principal/release")
     async def release_principal(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -516,7 +515,7 @@ def _register_base_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -528,12 +527,12 @@ def _register_base_routes(application: FastAPI) -> None:
             "approvals": state.release_approvals,
         }
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
         return {"job_id": job_id, "transfer_ref": payload["transfer_ref"]}
 
     @application.post("/jobs/{job_id}/execution-evidence")
     async def submit_execution_evidence(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -558,7 +557,7 @@ def _register_base_routes(application: FastAPI) -> None:
 def _register_mandate_routes(application: FastAPI) -> None:
     @application.post("/jobs/{job_id}/mandates/intent")
     async def create_intent_mandate(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -575,7 +574,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/mandates/cart")
     async def propose_cart_mandate(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -592,7 +591,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/mandates/cart/sign")
     async def sign_cart_mandate(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -604,7 +603,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -621,9 +620,9 @@ def _register_mandate_routes(application: FastAPI) -> None:
             result = engine.check(intent, cart)
             constraint_check = result.model_dump()
 
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         new_state = derive_ap2_job_state(events)
         resp = {
             "job_id": job_id,
@@ -637,7 +636,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/mandates/cart/approve")
     async def approve_cart(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -654,7 +653,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/mandates/payment")
     async def create_payment_mandate(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -671,7 +670,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/mandates/payment/sign")
     async def sign_payment_mandate(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -691,7 +690,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
         store = _store(request)
         if not store.job_exists(job_id):
             raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         return {
             "job_id": job_id,
@@ -708,7 +707,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
         store = _store(request)
         if not store.job_exists(job_id):
             raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         if not state.intent_mandate or not state.cart_mandate:
             return {"job_id": job_id, "result": None, "reason": "Missing mandates"}
@@ -725,7 +724,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
 def _register_settlement_routes(application: FastAPI) -> None:
     @application.post("/jobs/{job_id}/settlement/x402/initiate")
     async def initiate_x402(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -737,7 +736,7 @@ def _register_settlement_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -763,9 +762,9 @@ def _register_settlement_routes(application: FastAPI) -> None:
             "x402_payer": result.payer,
         }
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         new_state = derive_ap2_job_state(events)
         return {
             "job_id": job_id,
@@ -778,7 +777,7 @@ def _register_settlement_routes(application: FastAPI) -> None:
 
     @application.post("/jobs/{job_id}/settlement/x402/confirm")
     async def confirm_x402(
-        job_id: str, envelope: AP2SignedActionEnvelope, request: Request,
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
     ):
         store = _store(request)
         if not store.job_exists(job_id):
@@ -790,7 +789,7 @@ def _register_settlement_routes(application: FastAPI) -> None:
         _verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         state = derive_ap2_job_state(events)
         validate_ap2_transition(state, envelope)
 
@@ -799,9 +798,9 @@ def _register_settlement_routes(application: FastAPI) -> None:
             "x402_settlement_ref": f"x402_settled:{job_id}",
         }
         envelope = envelope.model_copy(update={"payload": payload})
-        store.append_ap2_event(envelope)
+        store.append_event(envelope)
 
-        events = store.get_ap2_events(job_id)
+        events = store.get_events(job_id)
         new_state = derive_ap2_job_state(events)
         return {
             "job_id": job_id,

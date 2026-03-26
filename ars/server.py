@@ -224,9 +224,8 @@ def _register_routes(application: FastAPI) -> None:
 
         vault = _vault(request)
         assert state.agreement is not None
-        lock_ref = vault.lock(
-            job_id, state.agreement.fee.amount, state.agreement.fee.currency
-        )
+        agr = AgreementDraft(**state.agreement)
+        lock_ref = vault.lock(job_id, agr.fee.amount, agr.fee.currency)
 
         payload = {**envelope.payload, "lock_ref": lock_ref}
         envelope = envelope.model_copy(update={"payload": payload})
@@ -435,9 +434,11 @@ def _register_routes(application: FastAPI) -> None:
         amt = int(state.uw_decision.get("collateral_required") or 0)
         if amt <= 0:
             raise BadRequestError("No collateral required for this job")
-        assert state.agreement and state.agreement.principal
+        assert state.agreement
+        agr = AgreementDraft(**state.agreement)
+        assert agr.principal
         cv = _collateral_vault(request)
-        collateral_ref = cv.lock(job_id, amt, state.agreement.principal.currency)
+        collateral_ref = cv.lock(job_id, amt, agr.principal.currency)
 
         payload = {**envelope.payload, "amount": amt, "collateral_ref": collateral_ref}
         envelope = envelope.model_copy(update={"payload": payload})
@@ -523,13 +524,15 @@ def _register_routes(application: FastAPI) -> None:
         state = derive_job_state(events)
         validate_transition(state, envelope)
 
-        assert state.agreement and state.agreement.principal
+        assert state.agreement
+        agr = AgreementDraft(**state.agreement)
+        assert agr.principal
         pv = _principal_vault(request)
         transfer_ref = pv.release(
             job_id,
-            state.agreement.principal.amount,
-            state.agreement.principal.currency,
-            state.agreement.principal.destination,
+            agr.principal.amount,
+            agr.principal.currency,
+            agr.principal.destination,
         )
 
         payload = {

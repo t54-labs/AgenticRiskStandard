@@ -1,4 +1,4 @@
-"""AP2-ARS data models: VDC mandates, extended agreement, AP2 envelopes/events."""
+"""AP2-ARS data models: VDC mandates, extended agreement, AP2-specific enums."""
 
 from __future__ import annotations
 
@@ -7,13 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from ars.models import (
-    FeeTerms,
-    FeeTrackState,
-    JobPhase,
-    PrincipalTerms,
-    PrincipalTrackState,
-)
+from ars.models import FeeTerms, JobStateView, PrincipalTerms
 
 
 # ── AP2 Enums ────────────────────────────────────────────────────────────────
@@ -136,7 +130,7 @@ class PaymentMandate(BaseModel):
     signature: str
 
 
-# ── AP2 Agreement ─────────────────────────────────────────────────────────────
+# ── AP2 Agreement (different domain model, NOT a subclass of AgreementDraft) ─
 
 
 class AP2AgreementDraft(BaseModel):
@@ -160,74 +154,13 @@ class AP2AgreementDraft(BaseModel):
     deliverable_spec: Optional[str] = None
 
 
-# ── AP2 Signed Envelope (string-typed) ────────────────────────────────────────
+# ── AP2 Job State View (inherits from base, adds mandate fields) ─────────────
 
 
-class AP2SignedActionEnvelope(BaseModel):
-    """Universal POST input for AP2. Uses string type to accept all event types."""
+class AP2JobStateView(JobStateView):
+    """Extends base JobStateView with AP2 mandate track fields."""
 
-    type: str
-    job_id: str
-    agreement_hash: str
-    payload: dict
-    actor: str  # hex-encoded Ed25519 public key
-    signature: str  # hex-encoded Ed25519 signature
-    timestamp: str  # ISO 8601 UTC
-
-
-class AP2CreateJobRequest(BaseModel):
-    """POST /jobs input for AP2. No job_id or agreement_hash."""
-
-    type: str = "JOB_CREATED"
-    payload: dict  # {"agreement": {...}}
-    actor: str
-    signature: str
-    timestamp: str
-
-
-# ── AP2 Stored Event ──────────────────────────────────────────────────────────
-
-
-class AP2Event(BaseModel):
-    event_id: int
-    job_id: str
-    event_type: str  # string, not enum
-    agreement_hash: str
-    payload: dict
-    actor: str
-    signature: str
-    timestamp: str
-    server_received_at: str
-
-
-# ── AP2 Job State View ───────────────────────────────────────────────────────
-
-
-class AP2JobStateView(BaseModel):
-    # Base ARS fields
-    job_id: str
-    phase: JobPhase
-    fee_track_state: Optional[FeeTrackState] = None
-    agreement: Optional[AP2AgreementDraft] = None
-    agreement_hash: Optional[str] = None
-    signatures: dict[str, bool] = {}
-    fee_lock_ref: Optional[str] = None
-    deliverable_ref: Optional[str] = None
-    evaluation: Optional[dict] = None
-    settlement_ref: Optional[str] = None
-    settlement_action: Optional[str] = None
-    created_at: str = ""
-    updated_at: str = ""
-    event_count: int = 0
-    principal_track_state: Optional[PrincipalTrackState] = None
-    uw_decision: Optional[dict] = None
-    premium_ref: Optional[str] = None
-    collateral_ref: Optional[str] = None
-    override: Optional[dict] = None
-    release_approvals: dict[str, bool] = {}
-    transfer_ref: Optional[str] = None
-    exec_evidence_ref: Optional[str] = None
-    # AP2-specific fields
+    agreement: Optional[AP2AgreementDraft] = None  # type: ignore[assignment]
     modality: Optional[Modality] = None
     mandate_track_state: Optional[MandateTrackState] = None
     intent_mandate: Optional[dict] = None

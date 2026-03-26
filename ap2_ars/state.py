@@ -5,24 +5,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ars.errors import BadRequestError, ConflictError, ForbiddenError
+from ars.errors import BadRequestError, ConflictError
 from ars.models import (
     AgreementDraft,
     Event,
-    EventType,
-    FeeTrackState,
     JobPhase,
-    PrincipalTrackState,
+    JobStateView,
     SignedActionEnvelope,
 )
 from ars.state import derive_job_state, validate_transition
 
 from .models import (
     AP2AgreementDraft,
-    AP2Event,
     AP2EventType,
     AP2JobStateView,
-    AP2SignedActionEnvelope,
     MandateTrackState,
     Modality,
     is_base_event_type,
@@ -58,24 +54,23 @@ def _to_base_agreement(ap2_dict: dict) -> dict:
     return base
 
 
-def _to_base_event(ev: AP2Event, base_agreement_cache: dict) -> Event:
-    """Convert an AP2Event to a base ARS Event, bridging agreement fields."""
-    payload = ev.payload
+def _bridge_event_for_base(ev: Event) -> Event:
+    """Bridge an AP2 event's agreement payload to base ARS format."""
     if ev.event_type in ("JOB_CREATED", "PROPOSAL_SUBMITTED"):
-        if "agreement" in payload:
-            base_agr = _to_base_agreement(payload["agreement"])
-            payload = {**payload, "agreement": base_agr}
-    return Event(
-        event_id=ev.event_id,
-        job_id=ev.job_id,
-        event_type=EventType(ev.event_type),
-        agreement_hash=ev.agreement_hash,
-        payload=payload,
-        actor=ev.actor,
-        signature=ev.signature,
-        timestamp=ev.timestamp,
-        server_received_at=ev.server_received_at,
-    )
+        if "agreement" in ev.payload:
+            base_agr = _to_base_agreement(ev.payload["agreement"])
+            return Event(
+                event_id=ev.event_id,
+                job_id=ev.job_id,
+                event_type=ev.event_type,
+                agreement_hash=ev.agreement_hash,
+                payload={**ev.payload, "agreement": base_agr},
+                actor=ev.actor,
+                signature=ev.signature,
+                timestamp=ev.timestamp,
+                server_received_at=ev.server_received_at,
+            )
+    return ev
 
 
 # ── Mandate track accumulator ────────────────────────────────────────────────
@@ -114,7 +109,7 @@ def _derive_mandate_track(acc: _MandateAcc) -> Optional[MandateTrackState]:
     return MandateTrackState.MANDATE_NONE
 
 
-def _replay_mandate_events(events: list[AP2Event]) -> _MandateAcc:
+def _replay_mandate_events(events: list[Event]) -> _MandateAcc:
     acc = _MandateAcc()
     for ev in events:
         et = ev.event_type
@@ -140,21 +135,20 @@ def _replay_mandate_events(events: list[AP2Event]) -> _MandateAcc:
 # ── Public: derive composite state ───────────────────────────────────────────
 
 
-def derive_ap2_job_state(events: list[AP2Event]) -> AP2JobStateView:
+def derive_ap2_job_state(events: list[Event]) -> AP2JobStateView:
     """Replay all events to compute the full AP2 job state.
 
-    Base ARS events are bridged to ars.state.derive_job_state().
+    Base ARS events are bridged and passed to ars.state.derive_job_state().
     AP2 mandate events are derived separately.
     Both are merged into AP2JobStateView.
     """
     if not events:
-        return AP2JobStateView(job_id="", phase=JobPhase.REQUEST,)
+        return AP2JobStateView(job_id="", phase=JobPhase.REQUEST)
 
-    # Separate base and mandate events
-    base_events: list[Event] = []
-    for ev in events:
-        if is_base_event_type(ev.event_type):
-            base_events.append(_to_base_event(ev, {}))
+    # Bridge base events (convert AP2 agreement fields to base format)
+    base_events = [
+        _bridge_event_for_base(ev) for ev in events if is_base_event_type(ev.event_type)
+    ]
 
     # Derive base state
     base_state = derive_job_state(base_events) if base_events else None
@@ -163,45 +157,28 @@ def derive_ap2_job_state(events: list[AP2Event]) -> AP2JobStateView:
     mandate_acc = _replay_mandate_events(events)
     mandate_track = _derive_mandate_track(mandate_acc)
 
-    # Extract AP2 agreement from the first JOB_CREATED event
+    # Extract AP2 agreement
     ap2_agreement: Optional[AP2AgreementDraft] = None
     modality: Optional[Modality] = None
     for ev in events:
-        if ev.event_type == "JOB_CREATED":
+        if ev.event_type in ("JOB_CREATED", "PROPOSAL_SUBMITTED"):
             agr_dict = ev.payload.get("agreement", {})
             ap2_agreement = AP2AgreementDraft(**agr_dict)
             modality = ap2_agreement.modality
-            break
-        elif ev.event_type == "PROPOSAL_SUBMITTED":
-            agr_dict = ev.payload.get("agreement", {})
-            ap2_agreement = AP2AgreementDraft(**agr_dict)
-            modality = ap2_agreement.modality
+            if ev.event_type == "JOB_CREATED":
+                break
 
-    # Merge
+    # Merge base + mandate into AP2JobStateView
+    _override_keys = {"event_count", "agreement"}
     if base_state:
         return AP2JobStateView(
-            job_id=base_state.job_id,
-            phase=base_state.phase,
-            fee_track_state=base_state.fee_track_state,
-            agreement=ap2_agreement,
-            agreement_hash=base_state.agreement_hash,
-            signatures=base_state.signatures,
-            fee_lock_ref=base_state.fee_lock_ref,
-            deliverable_ref=base_state.deliverable_ref,
-            evaluation=base_state.evaluation,
-            settlement_ref=base_state.settlement_ref,
-            settlement_action=base_state.settlement_action,
-            created_at=base_state.created_at,
-            updated_at=base_state.updated_at,
+            **{
+                k: v
+                for k, v in base_state.model_dump().items()
+                if k in JobStateView.model_fields and k not in _override_keys
+            },
             event_count=len(events),
-            principal_track_state=base_state.principal_track_state,
-            uw_decision=base_state.uw_decision,
-            premium_ref=base_state.premium_ref,
-            collateral_ref=base_state.collateral_ref,
-            override=base_state.override,
-            release_approvals=base_state.release_approvals,
-            transfer_ref=base_state.transfer_ref,
-            exec_evidence_ref=base_state.exec_evidence_ref,
+            agreement=ap2_agreement,
             modality=modality,
             mandate_track_state=mandate_track,
             intent_mandate=mandate_acc.intent_mandate,
@@ -232,7 +209,7 @@ def derive_ap2_job_state(events: list[AP2Event]) -> AP2JobStateView:
 
 
 def validate_ap2_transition(
-    state: AP2JobStateView, envelope: AP2SignedActionEnvelope,
+    state: AP2JobStateView, envelope: SignedActionEnvelope,
 ) -> None:
     """Validate an AP2 state transition.
 
@@ -251,7 +228,7 @@ def validate_ap2_transition(
         _validate_base_transition(state, envelope)
         return
 
-    # AP2 mandate events — validate here
+    # AP2 mandate events
     agr = state.agreement
     if agr is None:
         raise ConflictError("No agreement found")
@@ -268,7 +245,7 @@ def validate_ap2_transition(
     elif et == AP2EventType.CART_MANDATE_PROPOSED.value:
         if state.mandate_track_state not in (
             MandateTrackState.INTENT_CREATED,
-            MandateTrackState.CART_PROPOSED,  # allow re-proposal
+            MandateTrackState.CART_PROPOSED,
         ):
             raise ConflictError("CartMandate requires an IntentMandate first")
         registry.assert_role(envelope.actor, AP2Role.MERCHANT)
@@ -304,7 +281,6 @@ def validate_ap2_transition(
         if state.modality == Modality.HUMAN_PRESENT:
             registry.assert_role(envelope.actor, AP2Role.USER)
         else:
-            # In human-not-present, credentials provider auto-signs
             registry.assert_role(envelope.actor, AP2Role.CREDENTIALS_PROVIDER)
 
     elif et == AP2EventType.SETTLEMENT_402_INITIATED.value:
@@ -322,53 +298,20 @@ def validate_ap2_transition(
 
 
 def _validate_base_transition(
-    state: AP2JobStateView, envelope: AP2SignedActionEnvelope,
+    state: AP2JobStateView, envelope: SignedActionEnvelope,
 ) -> None:
     """Bridge AP2 state to base ARS validation."""
     if state.agreement is None:
-        return  # nothing to validate yet
+        return
 
     agr = state.agreement
     base_agr_dict = _to_base_agreement(agr.model_dump())
-    base_agreement = AgreementDraft(**base_agr_dict)
 
-    # Build a minimal base JobStateView for validation
-    from ars.models import JobStateView
+    # Build base JobStateView using dict filtering
+    base_fields = {
+        k: v for k, v in state.model_dump().items() if k in JobStateView.model_fields
+    }
+    base_fields["agreement"] = base_agr_dict
+    base_state = JobStateView(**base_fields)
 
-    base_state = JobStateView(
-        job_id=state.job_id,
-        phase=state.phase,
-        fee_track_state=state.fee_track_state,
-        agreement=base_agreement,
-        agreement_hash=state.agreement_hash,
-        signatures=state.signatures,
-        fee_lock_ref=state.fee_lock_ref,
-        deliverable_ref=state.deliverable_ref,
-        evaluation=state.evaluation,
-        settlement_ref=state.settlement_ref,
-        settlement_action=state.settlement_action,
-        created_at=state.created_at,
-        updated_at=state.updated_at,
-        event_count=state.event_count,
-        principal_track_state=state.principal_track_state,
-        uw_decision=state.uw_decision,
-        premium_ref=state.premium_ref,
-        collateral_ref=state.collateral_ref,
-        override=state.override,
-        release_approvals=state.release_approvals,
-        transfer_ref=state.transfer_ref,
-        exec_evidence_ref=state.exec_evidence_ref,
-    )
-
-    # Build base envelope
-    base_envelope = SignedActionEnvelope(
-        type=EventType(envelope.type),
-        job_id=envelope.job_id,
-        agreement_hash=envelope.agreement_hash,
-        payload=envelope.payload,
-        actor=envelope.actor,
-        signature=envelope.signature,
-        timestamp=envelope.timestamp,
-    )
-
-    validate_transition(base_state, base_envelope)
+    validate_transition(base_state, envelope)

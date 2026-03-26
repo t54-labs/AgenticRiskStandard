@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # ── Enums ────────────────────────────────────────────────────────────────────
@@ -84,6 +84,8 @@ class PrincipalTerms(BaseModel):
 
 
 class AgreementDraft(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     version: str = "ars/0.1"
     job_type: str
     description: str
@@ -102,7 +104,7 @@ class AgreementDraft(BaseModel):
 
 
 class SignedActionEnvelope(BaseModel):
-    type: EventType
+    type: str
     job_id: str
     agreement_hash: str
     payload: dict
@@ -127,7 +129,7 @@ class CreateJobRequest(BaseModel):
 class Event(BaseModel):
     event_id: int
     job_id: str
-    event_type: EventType
+    event_type: str
     agreement_hash: str
     payload: dict
     actor: str
@@ -143,7 +145,7 @@ class JobStateView(BaseModel):
     job_id: str
     phase: JobPhase
     fee_track_state: Optional[FeeTrackState] = None
-    agreement: Optional[AgreementDraft] = None
+    agreement: Optional[dict] = None
     agreement_hash: Optional[str] = None
     signatures: dict[str, bool] = {}
     fee_lock_ref: Optional[str] = None

@@ -228,7 +228,7 @@ def derive_job_state(events: list[Event]) -> JobStateView:
         job_id=acc.job_id,
         phase=_derive_phase(acc),
         fee_track_state=_derive_fee_track(acc),
-        agreement=acc.agreement,
+        agreement=acc.agreement.model_dump() if acc.agreement else None,
         agreement_hash=acc.agreement_hash,
         signatures=acc.signatures,
         fee_lock_ref=acc.fee_lock_ref,
@@ -256,7 +256,7 @@ def derive_job_state(events: list[Event]) -> JobStateView:
 def validate_transition(state: JobStateView, envelope: SignedActionEnvelope) -> None:
     """Raise an HTTP error if the transition is not allowed."""
     et = envelope.type
-    agr = state.agreement
+    agr = AgreementDraft(**state.agreement) if state.agreement else None
 
     # Every post-creation action must reference the correct agreement_hash
     if et != EventType.JOB_CREATED:
