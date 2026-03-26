@@ -1,0 +1,136 @@
+[
+  {
+    "inputs": [
+      {"internalType": "address", "name": "_usdc", "type": "address"},
+      {"internalType": "address", "name": "_admin", "type": "address"}
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "usdc",
+    "outputs": [{"internalType": "contract IERC20", "name": "", "type": "address"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "OPERATOR_ROLE",
+    "outputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"internalType": "uint8", "name": "depositType", "type": "uint8"},
+      {"internalType": "address", "name": "payer", "type": "address"},
+      {"internalType": "address", "name": "payee", "type": "address"},
+      {"internalType": "uint256", "name": "amount", "type": "uint256"}
+    ],
+    "name": "recordDeposit",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"internalType": "uint8", "name": "depositType", "type": "uint8"}
+    ],
+    "name": "release",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"internalType": "uint8", "name": "depositType", "type": "uint8"}
+    ],
+    "name": "refund",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"internalType": "address", "name": "treasury", "type": "address"}
+    ],
+    "name": "slash",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"internalType": "uint8", "name": "depositType", "type": "uint8"}
+    ],
+    "name": "getDeposit",
+    "outputs": [
+      {
+        "components": [
+          {"internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+          {"internalType": "address", "name": "payer", "type": "address"},
+          {"internalType": "address", "name": "payee", "type": "address"},
+          {"internalType": "uint256", "name": "amount", "type": "uint256"},
+          {"internalType": "uint8", "name": "depositType", "type": "uint8"},
+          {"internalType": "uint8", "name": "status", "type": "uint8"}
+        ],
+        "internalType": "struct ARSEscrow.Deposit",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"indexed": false, "internalType": "uint8", "name": "depositType", "type": "uint8"},
+      {"indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"indexed": false, "internalType": "address", "name": "payer", "type": "address"},
+      {"indexed": false, "internalType": "address", "name": "payee", "type": "address"}
+    ],
+    "name": "Deposited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"indexed": false, "internalType": "uint8", "name": "depositType", "type": "uint8"},
+      {"indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"indexed": false, "internalType": "address", "name": "payee", "type": "address"}
+    ],
+    "name": "Released",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"indexed": false, "internalType": "uint8", "name": "depositType", "type": "uint8"},
+      {"indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"indexed": false, "internalType": "address", "name": "payer", "type": "address"}
+    ],
+    "name": "Refunded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {"indexed": true, "internalType": "bytes32", "name": "jobId", "type": "bytes32"},
+      {"indexed": false, "internalType": "uint8", "name": "depositType", "type": "uint8"},
+      {"indexed": false, "internalType": "uint256", "name": "amount", "type": "uint256"},
+      {"indexed": false, "internalType": "address", "name": "treasury", "type": "address"}
+    ],
+    "name": "Slashed",
+    "type": "event"
+  }
+]
