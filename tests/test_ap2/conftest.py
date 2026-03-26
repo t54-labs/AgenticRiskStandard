@@ -58,12 +58,6 @@ def underwriter_keys():
     return sk, sk.verify_key.encode().hex()
 
 
-@pytest.fixture()
-def authority_keys():
-    sk = SigningKey.generate()
-    return sk, sk.verify_key.encode().hex()
-
-
 # ── App / client ──────────────────────────────────────────────────────────────
 
 
@@ -116,7 +110,6 @@ def make_fund_moving_ap2_agreement_dict(
     merchant_pk: str,
     processor_pk: str,
     uw_pk: str,
-    auth_pk: str,
     **overrides,
 ) -> dict:
     base = make_ap2_agreement_dict(
@@ -126,7 +119,6 @@ def make_fund_moving_ap2_agreement_dict(
         {
             "job_type": "fund-moving",
             "underwriter_pubkey": uw_pk,
-            "human_authority_pubkey": auth_pk,
             "principal": {
                 "amount": 50000,
                 "currency": "USD",

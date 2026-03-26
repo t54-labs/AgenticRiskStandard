@@ -41,10 +41,9 @@ def test_role_mapping():
 
 
 def test_optional_roles():
-    agr = _make_agreement(underwriter_pubkey="uw_pk", human_authority_pubkey="auth_pk")
+    agr = _make_agreement(underwriter_pubkey="uw_pk")
     reg = RoleRegistry(agr)
     assert reg.get_role("uw_pk") == AP2Role.UNDERWRITER
-    assert reg.get_role("auth_pk") == AP2Role.HUMAN_AUTHORITY
 
 
 def test_assert_role_success():

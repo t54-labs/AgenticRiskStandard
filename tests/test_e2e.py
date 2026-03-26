@@ -374,12 +374,10 @@ def test_get_nonexistent_job(client):
 
 
 def _create_fund_moving_job(
-    client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+    client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
 ):
     """Create a fund-moving job and return (job_id, agr_hash, agr_dict)."""
-    agr = make_fund_moving_agreement_dict(
-        req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
-    )
+    agr = make_fund_moving_agreement_dict(req_pk, agent_pk, eval_pk, uw_pk, settle_pk)
     req = make_create_request({"agreement": agr}, req_sk)
     resp = client.post("/jobs", json=req)
     assert resp.status_code == 201, resp.json()
@@ -451,7 +449,6 @@ def test_uw_happy_approve_no_collateral(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
     """Full UW flow: approve with premium, no collateral → release → evidence."""
@@ -459,12 +456,11 @@ def test_uw_happy_approve_no_collateral(
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     uw_sk, uw_pk = underwriter_keys
-    _, auth_pk = authority_keys
     settle_sk, settle_pk = settlement_keys
 
     # Create fund-moving job, sign, lock fee
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
@@ -510,7 +506,6 @@ def test_uw_happy_approve_with_collateral(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
     """UW approves with collateral → lock collateral → release."""
@@ -518,11 +513,10 @@ def test_uw_happy_approve_with_collateral(
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     uw_sk, uw_pk = underwriter_keys
-    _, auth_pk = authority_keys
     settle_sk, settle_pk = settlement_keys
 
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
@@ -558,19 +552,17 @@ def test_uw_reject_override_proceed(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
-    """UW rejects → human authority overrides with proceed → release."""
+    """UW rejects → requestor overrides with proceed → release."""
     req_sk, req_pk = requestor_keys
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     uw_sk, uw_pk = underwriter_keys
-    auth_sk, auth_pk = authority_keys
     settle_sk, settle_pk = settlement_keys
 
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
@@ -582,9 +574,9 @@ def test_uw_reject_override_proceed(
     state = client.get(f"/jobs/{job_id}").json()
     assert state["principal_track_state"] == "OVERRIDE_PENDING"
 
-    # Human authority overrides with "proceed"
+    # Requestor overrides with "proceed"
     env = make_envelope(
-        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, auth_sk,
+        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, req_sk,
     )
     resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
     assert resp.status_code == 200
@@ -602,7 +594,6 @@ def test_uw_collateral_refused_override(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
     """UW approves with collateral → requestor refuses → override → release."""
@@ -610,11 +601,10 @@ def test_uw_collateral_refused_override(
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     uw_sk, uw_pk = underwriter_keys
-    auth_sk, auth_pk = authority_keys
     settle_sk, settle_pk = settlement_keys
 
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
@@ -627,9 +617,9 @@ def test_uw_collateral_refused_override(
     assert resp.status_code == 200
     assert resp.json()["principal_track_state"] == "OVERRIDE_PENDING"
 
-    # Human authority overrides
+    # Requestor overrides
     env = make_envelope(
-        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, auth_sk,
+        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, req_sk,
     )
     resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
     assert resp.status_code == 200
@@ -667,7 +657,6 @@ def test_wrong_role_uw_decide(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
     """Requestor cannot submit UW decision (only underwriter)."""
@@ -675,11 +664,10 @@ def test_wrong_role_uw_decide(
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     _, uw_pk = underwriter_keys
-    _, auth_pk = authority_keys
     _, settle_pk = settlement_keys
 
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
@@ -699,7 +687,6 @@ def test_cannot_release_before_approval(
     agent_keys,
     evaluator_keys,
     underwriter_keys,
-    authority_keys,
     settlement_keys,
 ):
     """PRINCIPAL_RELEASED requires RELEASABLE state."""
@@ -707,11 +694,10 @@ def test_cannot_release_before_approval(
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
     uw_sk, uw_pk = underwriter_keys
-    _, auth_pk = authority_keys
     settle_sk, settle_pk = settlement_keys
 
     job_id, agr_hash, _ = _create_fund_moving_job(
-        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, auth_pk, settle_pk
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
     )
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)

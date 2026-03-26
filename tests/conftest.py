@@ -51,12 +51,6 @@ def underwriter_keys():
 
 
 @pytest.fixture()
-def authority_keys():
-    sk = SigningKey.generate()
-    return sk, sk.verify_key.encode().hex()
-
-
-@pytest.fixture()
 def settlement_keys():
     sk = SigningKey.generate()
     return sk, sk.verify_key.encode().hex()
@@ -114,13 +108,7 @@ def make_agreement_dict(req_pk: str, agent_pk: str, eval_pk: str, **overrides) -
 
 
 def make_fund_moving_agreement_dict(
-    req_pk: str,
-    agent_pk: str,
-    eval_pk: str,
-    uw_pk: str,
-    auth_pk: str,
-    settle_pk: str,
-    **overrides,
+    req_pk: str, agent_pk: str, eval_pk: str, uw_pk: str, settle_pk: str, **overrides,
 ) -> dict:
     """Return a plain dict for a fund-moving agreement with principal terms."""
     agr = {
@@ -132,7 +120,6 @@ def make_fund_moving_agreement_dict(
         "evaluator_pubkey": eval_pk,
         "fee": {"amount": 100, "currency": "USD"},
         "underwriter_pubkey": uw_pk,
-        "human_authority_pubkey": auth_pk,
         "settlement_layer_pubkey": settle_pk,
         "principal": {"amount": 10000, "currency": "USD", "destination": "vendor-acct"},
     }

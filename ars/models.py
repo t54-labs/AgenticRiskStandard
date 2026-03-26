@@ -95,7 +95,6 @@ class AgreementDraft(BaseModel):
     fee: FeeTerms
     deliverable_spec: Optional[str] = None
     underwriter_pubkey: Optional[str] = None
-    human_authority_pubkey: Optional[str] = None
     settlement_layer_pubkey: Optional[str] = None
     principal: Optional[PrincipalTerms] = None
 

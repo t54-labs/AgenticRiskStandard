@@ -147,7 +147,6 @@ class AP2AgreementDraft(BaseModel):
     payment_processor_pubkey: str
     # Optional (fund-moving)
     underwriter_pubkey: Optional[str] = None
-    human_authority_pubkey: Optional[str] = None
     # Terms
     fee: FeeTerms
     principal: Optional[PrincipalTerms] = None

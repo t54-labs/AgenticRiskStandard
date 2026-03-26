@@ -18,7 +18,6 @@ class AP2Role(str, Enum):
     MERCHANT = "merchant"
     PAYMENT_PROCESSOR = "payment_processor"
     UNDERWRITER = "underwriter"
-    HUMAN_AUTHORITY = "human_authority"
 
 
 class RoleRegistry:
@@ -36,8 +35,6 @@ class RoleRegistry:
         }
         if agreement.underwriter_pubkey:
             self._map[agreement.underwriter_pubkey] = AP2Role.UNDERWRITER
-        if agreement.human_authority_pubkey:
-            self._map[agreement.human_authority_pubkey] = AP2Role.HUMAN_AUTHORITY
 
     def get_role(self, pubkey: str) -> Optional[AP2Role]:
         return self._map.get(pubkey)

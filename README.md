@@ -2,6 +2,33 @@
 
 A settlement-layer protocol for trustworthy AI agent services. ARS provides cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks.
 
+**ARS is designed as an abstract protocol with pluggable concrete implementations.** The `ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
+
+This repo ships with one concrete implementation: **`ap2_ars/`**, which realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract.
+
+## Abstract vs. Concrete
+
+```
+ars/          Abstract protocol layer (models, state machine, crypto, event store)
+  |              - Generic event types, agreement structure, role-based validation
+  |              - Mock vaults for development/testing
+  |              - Pluggable: any concrete implementation can inherit from it
+  |
+ap2_ars/      Concrete AP2 realization (inherits from ars/)
+                 - AP2 mandates (IntentMandate, CartMandate, PaymentMandate)
+                 - 6-actor model with cryptographic agent-payment firewall
+                 - x402 payment rail (Coinbase SDK, on-chain USDC via EIP-3009)
+                 - ARSEscrow.sol smart contract (hold/release/refund/slash)
+                 - Dual modality: human-present and human-NOT-present flows
+```
+
+`ap2_ars/` extends `ars/` through proper inheritance:
+- Uses `ars.models.SignedActionEnvelope` and `ars.models.Event` directly (no reimplementation)
+- `AP2JobStateView` inherits from `ars.models.JobStateView`, adding mandate track fields
+- Uses `ars.store.EventStore` directly for event persistence
+- Calls `ars.state.derive_job_state()` and `ars.state.validate_transition()` for base fee/principal tracks
+- Adds a parallel mandate state machine for AP2-specific event types
+
 ## Overview
 
 When a human (or organization) delegates a task to an AI agent, both sides need guarantees: the requestor needs assurance the agent will deliver, and the agent needs assurance it will be paid. ARS solves this by introducing a structured protocol where:
@@ -11,22 +38,25 @@ When a human (or organization) delegates a task to an AI agent, both sides need 
 - For high-value fund-moving jobs, an **underwriting track** gates principal release behind risk assessment, collateral, and multi-party approval
 - All state is **derived by replaying the event log** — there is no mutable state to corrupt
 
-## Roles
+---
+
+## ars/ — Abstract Protocol
+
+### Roles
 
 ARS defines six participant roles. Each role is identified by an Ed25519 public key and can only perform specific actions:
 
 | Role | Description |
 |------|-------------|
-| **Requestor** | Creates jobs, locks fee escrow, pays premiums, approves principal release |
+| **Requestor** | Creates jobs, locks fee escrow, pays premiums, approves principal release, submits override decisions |
 | **Business Agent** | Signs agreements, submits deliverables, requests underwriting, submits execution evidence |
 | **Evaluator** | Independently evaluates deliverable quality (pass/fail verdict) |
 | **Underwriter** | Assesses risk for fund-moving jobs; approves/rejects with premium and collateral terms |
-| **Human Authority** | Provides override decisions when underwriting rejects or collateral is refused |
 | **Settlement Layer** | Executes principal fund transfers after all approvals are in place |
 
-## Job Lifecycle
+### Job Lifecycle
 
-### Fee Track (all jobs)
+#### Fee Track (all jobs)
 
 Every job follows the fee track, which manages the service fee through escrow:
 
@@ -47,7 +77,7 @@ REQUEST ──> NEGOTIATION ──> TRANSACTION ──> EVALUATION ──> CLOSE
 6. **Evaluator** evaluates the outcome — pass or fail (`POST /jobs/{id}/evaluate`)
 7. Fee is settled — released to agent on pass, refunded to requestor on fail (`POST /jobs/{id}/fee/settle`)
 
-### Principal Track (fund-moving jobs)
+#### Principal Track (fund-moving jobs)
 
 Jobs with `job_type: "fund-moving"` or a `principal` field activate a second track that runs in parallel with the fee track:
 
@@ -57,7 +87,7 @@ UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL
    Agent requests    Underwriter      Requestor pays         Requestor locks
    underwriting      decides          premium (if any)       collateral (if any)
                          │
-                    If rejected ──> OVERRIDE_PENDING ──> Human authority decides
+                    If rejected ──> OVERRIDE_PENDING ──> Requestor decides override
                                                               │
                                               ┌───────────────┘
                                               v
@@ -69,25 +99,195 @@ UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL
                                                           principal
 ```
 
-## Quickstart
-
-### Install
+### Quickstart
 
 ```bash
+# Install
 pip install -e ".[dev]"
-```
 
-### Run the server
-
-```bash
+# Run the abstract ARS server (mock vaults)
 uvicorn ars.server:app --host 0.0.0.0 --port 8000
+
+# Run base tests
+pytest tests/test_e2e.py -v
 ```
 
-### Run tests
+### Architecture
+
+```
+ars/
+  models.py    # Pydantic models, enums (JobPhase, EventType, etc.)
+  crypto.py    # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
+  server.py    # FastAPI app with all endpoints
+  state.py     # Event-sourced state derivation + transition validation
+  store.py     # SQLite append-only event store
+  vault.py     # Mock escrow, collateral, and principal vaults
+  errors.py    # HTTP error hierarchy
+```
+
+**Event sourcing**: The server stores every signed action as an immutable event. Job state is never stored directly — it is always derived by replaying all events for a job through `derive_job_state()`. This makes the system auditable and tamper-evident.
+
+**State machine**: `validate_transition()` enforces that each action is only allowed in the correct phase/state and by the correct role. Invalid transitions return `409 Conflict`; unauthorized actors get `403 Forbidden`.
+
+**Mock vaults**: The abstract implementation uses in-memory mock vaults (`MockEscrowVault`, `MockCollateralVault`, `MockPrincipalVault`). Concrete implementations replace these with real settlement — see `ap2_ars/` below.
+
+---
+
+## ap2_ars/ — Concrete AP2 Implementation
+
+`ap2_ars/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `ars/` primitives and adds three layers:
+
+### 1. AP2 Mandates (Verifiable Digital Credentials)
+
+Three signed credential types that provide cryptographic proof of user intent:
+
+| Mandate | Signer | Purpose |
+|---------|--------|---------|
+| **IntentMandate** | User | Pre-authorizes autonomous purchases: budget, merchant whitelist, SKU constraints, TTL |
+| **CartMandate** | Merchant | Price/items guarantee with short TTL (5-15 min), prevents bait-and-switch |
+| **PaymentMandate** | User / Credentials Provider | Final payment authorization referencing the CartMandate hash |
+
+### 2. Six-Actor Model with Firewall
+
+AP2 extends the base ARS roles to six mandatory actors:
+
+| AP2 Role | Base ARS Equivalent | Purpose |
+|----------|-------------------|---------|
+| **User** | Requestor | Signs mandates, ultimate payment authority |
+| **Shopping Agent** | Business Agent | Negotiates with merchants, **never sees payment data** |
+| **Evaluator** | Evaluator | Independent quality verdict |
+| **Credentials Provider** | *(new)* | Secure wallet holding PCI/PII data, executes PaymentMandate |
+| **Merchant** | *(new)* | Builds cart, signs CartMandate |
+| **Payment Processor** | Settlement Layer | Routes transactions, triggers 3DS, settles via x402 |
+
+The **agent-payment firewall** is enforced cryptographically at job creation: the Shopping Agent's key must differ from the Credentials Provider's and Payment Processor's keys. The agent orchestrates the flow but cannot access payment credentials.
+
+### 3. Settlement Stack: x402 + ARSEscrow
+
+```
+x402 (payment rail)     ──>  ARSEscrow.sol (hold/release/refund/slash)
+  │                               │
+  EIP-3009 gasless USDC          On-chain escrow contract
+  via Coinbase facilitator        per-job deposit tracking
+```
+
+**x402** handles moving USDC between wallets — it's a one-shot payment protocol using EIP-3009 `transferWithAuthorization`. The user signs an authorization offline, and the Coinbase facilitator submits it on-chain.
+
+**ARSEscrow.sol** handles the business logic x402 can't do alone — holding funds, conditional release, refund, and collateral slashing. x402 transfers USDC *into* the escrow contract; the contract's functions determine where it goes *out*:
+
+| Contract Function | What it does |
+|---|---|
+| `recordDeposit(jobId, type, payer, payee, amount)` | Tags a deposit after x402 transfer |
+| `release(jobId, type)` | Sends USDC to payee (business agent/merchant) |
+| `refund(jobId, type)` | Returns USDC to payer (user) |
+| `slash(jobId, treasury)` | Seizes collateral to protocol treasury |
+
+### Dual Modality
+
+**Human-Present** (10-step flow): User sees the cart and explicitly approves before payment.
+
+```
+User → Agent → Merchant negotiation → CartMandate signed
+  → User approves cart → PaymentMandate → Credentials Provider
+  → Payment Processor → x402 settlement → Confirmation
+```
+
+**Human-NOT-Present** (autonomous): User pre-signs an IntentMandate with constraints. The agent shops within those boundaries without human intervention.
+
+```
+User pre-signs IntentMandate (budget, merchants, SKUs, TTL)
+  → Agent shops → Merchant signs CartMandate
+  → Constraint engine auto-validates (budget, whitelist, SKU patterns)
+  → Credentials Provider auto-executes → x402 settlement
+```
+
+### AP2-Specific Endpoints
+
+In addition to all base ARS endpoints, `ap2_ars/` adds:
+
+| Method | Path | Event Type | Actor |
+|--------|------|-----------|-------|
+| `POST` | `/jobs/{id}/mandates/intent` | `INTENT_MANDATE_CREATED` | User |
+| `POST` | `/jobs/{id}/mandates/cart` | `CART_MANDATE_PROPOSED` | Merchant |
+| `POST` | `/jobs/{id}/mandates/cart/sign` | `CART_MANDATE_SIGNED` | Merchant |
+| `POST` | `/jobs/{id}/mandates/cart/approve` | `CART_APPROVED_BY_USER` | User |
+| `POST` | `/jobs/{id}/mandates/payment` | `PAYMENT_MANDATE_CREATED` | Credentials Provider |
+| `POST` | `/jobs/{id}/mandates/payment/sign` | `PAYMENT_MANDATE_SIGNED` | User |
+| `POST` | `/jobs/{id}/settlement/x402/initiate` | `SETTLEMENT_402_INITIATED` | Payment Processor |
+| `POST` | `/jobs/{id}/settlement/x402/confirm` | `SETTLEMENT_402_CONFIRMED` | Payment Processor |
+| `GET` | `/jobs/{id}/mandates` | — | Any |
+| `GET` | `/jobs/{id}/constraints/check` | — | Any |
+
+### Quickstart
 
 ```bash
+# Install with AP2 extras (x402 SDK + web3)
+pip install -e ".[dev,ap2]"
+
+# Run the AP2 server (mock settlement for development)
+uvicorn ap2_ars.server:app --host 0.0.0.0 --port 8000
+
+# Run AP2 tests
+pytest tests/test_ap2/ -v
+
+# Run ALL tests (base + AP2)
 pytest tests/ -v
 ```
+
+For real on-chain settlement, pass a configured `SettlementLayer`:
+
+```python
+from ap2_ars.server import create_app
+from ap2_ars.x402 import LiveX402Settlement
+from ap2_ars.escrow import LiveEscrowClient
+from ap2_ars.settlement import LiveSettlementLayer
+
+x402 = LiveX402Settlement(
+    facilitator_url="https://api.developer.coinbase.com/x402/facilitator",
+    pay_to="<escrow-contract-address>",
+    network="eip155:8453",  # Base Mainnet
+)
+escrow = LiveEscrowClient(
+    rpc_url="https://mainnet.base.org",
+    contract_address="<deployed-ARSEscrow-address>",
+    abi=...,  # load from ap2_ars/contracts/ars_escrow_abi.json
+    operator_key="<operator-private-key>",
+)
+settlement = LiveSettlementLayer(x402=x402, escrow=escrow)
+app = create_app(settlement=settlement)
+```
+
+### Architecture
+
+```
+ap2_ars/
+  models.py        # AP2AgreementDraft, VDC types, AP2JobStateView (inherits JobStateView)
+  vdc.py           # VDC creation, Ed25519 signing/verification, TTL enforcement
+  roles.py         # 6-actor RoleRegistry + cryptographic firewall
+  constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
+  x402.py          # x402 payment rail — LiveX402Settlement + MockX402Settlement
+  escrow.py        # Python interface to ARSEscrow contract — LiveEscrowClient + Mock
+  settlement.py    # Unified SettlementLayer composing x402 + escrow
+  state.py         # Composite state machine (base ARS + mandate track)
+  server.py        # FastAPI app — base ARS endpoints + AP2 mandate/settlement endpoints
+  contracts/
+    ARSEscrow.sol       # Solidity escrow contract (USDC hold/release/refund/slash)
+    ars_escrow_abi.json  # Pre-compiled contract ABI
+```
+
+---
+
+## Building Your Own Concrete Implementation
+
+To build a new realization of ARS (e.g., using a different payment rail or blockchain):
+
+1. **Import from `ars/`**: Use `SignedActionEnvelope`, `Event`, `EventStore`, `JobStateView`, `derive_job_state()`, `validate_transition()` directly
+2. **Define your agreement model**: Map your domain's actors to ARS roles via a bridging function (see `ap2_ars/state.py:_to_base_agreement()`)
+3. **Extend `JobStateView`**: Add fields for your protocol-specific state
+4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `ap2_ars/settlement.py`)
+5. **Add new event types**: String-typed events pass through the base store/state unchanged; add your own state machine for domain-specific transitions
+
+---
 
 ## Connecting to the Protocol
 
@@ -153,7 +353,7 @@ agreement_hash = hashlib.sha256(canonicalize(agreement_dict)).hexdigest()
 
 The server computes and returns this hash when a job is created or a proposal is submitted.
 
-## API Reference
+## Base ARS API Reference
 
 ### Job Creation
 
@@ -190,7 +390,6 @@ For fund-moving jobs, add underwriting fields to the agreement:
   "agreement": {
     "job_type": "fund-moving",
     "underwriter_pubkey": "<uw-pk>",
-    "human_authority_pubkey": "<authority-pk>",
     "settlement_layer_pubkey": "<settlement-pk>",
     "principal": {"amount": 10000, "currency": "USD", "destination": "vendor-acct"},
     ...
@@ -236,7 +435,7 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/premium` | `PREMIUM_PAID` | Requestor | `{"premium_ref": "..."}` |
 | `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Requestor | `{}` |
-| `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Human Authority | `{"decision": "proceed"}` |
+| `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |
 | `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/principal/release` | `PRINCIPAL_RELEASED` | Settlement Layer | `{}` |
 | `POST` | `/jobs/{id}/execution-evidence` | `EXECUTION_EVIDENCE_SUBMITTED` | Agent | `{"exec_evidence_ref": "..."}` |
@@ -248,126 +447,15 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `GET` | `/jobs/{id}` | Get current job state (derived from event log) |
 | `GET` | `/jobs/{id}/events` | Get full event history |
 
-### Example: Complete Fee-Track Job (Python)
-
-```python
-import json
-import hashlib
-from datetime import datetime, timezone
-import httpx
-from nacl.signing import SigningKey
-
-BASE = "http://localhost:8000"
-
-def canonicalize(obj):
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-
-def sign(sk, body):
-    return sk.sign(canonicalize(body)).signature.hex()
-
-def now():
-    return datetime.now(timezone.utc).isoformat()
-
-# 1. Generate keys for all participants
-requestor_sk = SigningKey.generate()
-agent_sk = SigningKey.generate()
-evaluator_sk = SigningKey.generate()
-
-req_pk = requestor_sk.verify_key.encode().hex()
-agent_pk = agent_sk.verify_key.encode().hex()
-eval_pk = evaluator_sk.verify_key.encode().hex()
-
-# 2. Requestor creates job
-agreement = {
-    "version": "ars/0.1",
-    "job_type": "code_review",
-    "description": "Review PR #42",
-    "requestor_pubkey": req_pk,
-    "business_agent_pubkey": agent_pk,
-    "evaluator_pubkey": eval_pk,
-    "fee": {"amount": 500, "currency": "USD"},
-}
-
-body = {"type": "JOB_CREATED", "payload": {"agreement": agreement},
-        "actor": req_pk, "timestamp": now()}
-body["signature"] = sign(requestor_sk, body)
-resp = httpx.post(f"{BASE}/jobs", json=body)
-job_id = resp.json()["job_id"]
-agr_hash = resp.json()["agreement_hash"]
-
-# 3. Both parties sign
-for sk in [requestor_sk, agent_sk]:
-    pk = sk.verify_key.encode().hex()
-    body = {"type": "AGREEMENT_SIGNED", "job_id": job_id,
-            "agreement_hash": agr_hash, "payload": {},
-            "actor": pk, "timestamp": now()}
-    body["signature"] = sign(sk, body)
-    httpx.post(f"{BASE}/jobs/{job_id}/signatures", json=body)
-
-# 4. Requestor locks fee
-body = {"type": "FEE_ESCROW_LOCKED", "job_id": job_id,
-        "agreement_hash": agr_hash, "payload": {},
-        "actor": req_pk, "timestamp": now()}
-body["signature"] = sign(requestor_sk, body)
-httpx.post(f"{BASE}/jobs/{job_id}/fee/lock", json=body)
-
-# 5. Agent submits deliverable
-body = {"type": "DELIVERABLE_SUBMITTED", "job_id": job_id,
-        "agreement_hash": agr_hash,
-        "payload": {"deliverable_ref": "ipfs://Qm..."},
-        "actor": agent_pk, "timestamp": now()}
-body["signature"] = sign(agent_sk, body)
-httpx.post(f"{BASE}/jobs/{job_id}/deliverable", json=body)
-
-# 6. Evaluator evaluates
-body = {"type": "OUTCOME_EVALUATED", "job_id": job_id,
-        "agreement_hash": agr_hash,
-        "payload": {"verdict": "pass", "reason": "All checks passed"},
-        "actor": eval_pk, "timestamp": now()}
-body["signature"] = sign(evaluator_sk, body)
-httpx.post(f"{BASE}/jobs/{job_id}/evaluate", json=body)
-
-# 7. Settle — release fee to agent
-body = {"type": "FEE_SETTLED", "job_id": job_id,
-        "agreement_hash": agr_hash,
-        "payload": {"action": "release"},
-        "actor": req_pk, "timestamp": now()}
-body["signature"] = sign(requestor_sk, body)
-httpx.post(f"{BASE}/jobs/{job_id}/fee/settle", json=body)
-
-# Check final state
-state = httpx.get(f"{BASE}/jobs/{job_id}").json()
-print(state["phase"])           # "CLOSED"
-print(state["fee_track_state"]) # "FEE_SETTLED_RELEASE"
-```
-
-## Architecture
-
-```
-ars/
-  models.py    # Pydantic models, enums (JobPhase, EventType, etc.)
-  crypto.py    # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
-  server.py    # FastAPI app with all endpoints
-  state.py     # Event-sourced state derivation + transition validation
-  store.py     # SQLite append-only event store
-  vault.py     # Mock escrow, collateral, and principal vaults
-```
-
-**Event sourcing**: The server stores every signed action as an immutable event. Job state is never stored directly — it is always derived by replaying all events for a job through `derive_job_state()`. This makes the system auditable and tamper-evident.
-
-**State machine**: `validate_transition()` enforces that each action is only allowed in the correct phase/state and by the correct role. Invalid transitions return `409 Conflict`; unauthorized actors get `403 Forbidden`.
-
-**Mock vaults**: The current implementation uses in-memory mock vaults (`MockEscrowVault`, `MockCollateralVault`, `MockPrincipalVault`). In production, these would be replaced with integrations to real payment rails, custodial services, or on-chain contracts.
-
 ## Error Codes
 
 | Code | Meaning |
 |------|---------|
-| `400` | Bad request (missing fields, type mismatch) |
+| `400` | Bad request (missing fields, type mismatch, firewall violation) |
 | `401` | Signature verification failed |
 | `403` | Actor not authorized for this action |
 | `404` | Job not found |
-| `409` | Invalid state transition (wrong phase, duplicate action, etc.) |
+| `409` | Invalid state transition (wrong phase, duplicate action, wrong modality) |
 
 ## License
 

@@ -364,8 +364,8 @@ def validate_transition(state: JobStateView, envelope: SignedActionEnvelope) -> 
     elif et == EventType.OVERRIDE_DECIDED:
         if state.principal_track_state != PrincipalTrackState.OVERRIDE_PENDING:
             raise ConflictError("Override requires OVERRIDE_PENDING state")
-        if agr and envelope.actor != agr.human_authority_pubkey:
-            raise ForbiddenError("Only human authority can submit override decision")
+        if agr and envelope.actor != agr.requestor_pubkey:
+            raise ForbiddenError("Only requestor can submit override decision")
 
     elif et == EventType.RELEASE_APPROVED:
         if state.principal_track_state != PrincipalTrackState.APPROVAL_PENDING:
