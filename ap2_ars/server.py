@@ -521,14 +521,22 @@ def _register_base_routes(application: FastAPI) -> None:
 
         assert state.agreement and state.agreement.principal
 
+        sl = _settlement(request)
+        result = await sl.release_principal(
+            job_id,
+            state.agreement.principal.amount,
+            state.agreement.principal.currency,
+            state.agreement.principal.destination,
+        )
+
         payload = {
             **envelope.payload,
-            "transfer_ref": f"transfer:{job_id}",
+            "transfer_ref": result.ref,
             "approvals": state.release_approvals,
         }
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
-        return {"job_id": job_id, "transfer_ref": payload["transfer_ref"]}
+        return {"job_id": job_id, "transfer_ref": result.ref}
 
     @application.post("/jobs/{job_id}/execution-evidence")
     async def submit_execution_evidence(

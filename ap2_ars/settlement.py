@@ -77,6 +77,18 @@ class SettlementLayer(ABC):
     async def unlock_collateral(self, job_id: str) -> SettleActionResult:
         ...
 
+    # Principal release
+    @abstractmethod
+    async def release_principal(
+        self,
+        job_id: str,
+        amount: int,
+        currency: str,
+        destination: Optional[str],
+        payment_payload: Optional[dict] = None,
+    ) -> SettleActionResult:
+        ...
+
     # Direct mandate payment (no escrow)
     @abstractmethod
     async def settle_mandate(
@@ -159,6 +171,28 @@ class LiveSettlementLayer(SettlementLayer):
         tx = await self._escrow.refund(job_id, DepositType.COLLATERAL)
         return SettleActionResult(tx_hash=tx, ref=f"collateral_unlocked:{job_id}")
 
+    async def release_principal(
+        self,
+        job_id: str,
+        amount: int,
+        currency: str,
+        destination: Optional[str],
+        payment_payload: Optional[dict] = None,
+    ) -> SettleActionResult:
+        # x402 transfer from escrow to destination, then record as PRINCIPAL deposit
+        x402_tx = None
+        if payment_payload:
+            req = await self._x402.create_payment_requirement(job_id, amount, currency)
+            result = await self._x402.settle(job_id, payment_payload, req.to_dict())
+            x402_tx = result.transaction
+
+        escrow_tx = await self._escrow.record_deposit(
+            job_id, DepositType.PRINCIPAL, "", destination or "", amount,
+        )
+        # Release immediately (principal goes straight to destination)
+        release_tx = await self._escrow.release(job_id, DepositType.PRINCIPAL)
+        return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")
+
     async def settle_mandate(
         self,
         job_id: str,
@@ -233,6 +267,20 @@ class MockSettlementLayer(SettlementLayer):
     async def unlock_collateral(self, job_id: str) -> SettleActionResult:
         tx = await self._escrow.refund(job_id, DepositType.COLLATERAL)
         return SettleActionResult(tx_hash=tx, ref=f"collateral_unlocked:{job_id}")
+
+    async def release_principal(
+        self,
+        job_id: str,
+        amount: int,
+        currency: str,
+        destination: Optional[str],
+        payment_payload: Optional[dict] = None,
+    ) -> SettleActionResult:
+        escrow_tx = await self._escrow.record_deposit(
+            job_id, DepositType.PRINCIPAL, "", destination or "", amount,
+        )
+        release_tx = await self._escrow.release(job_id, DepositType.PRINCIPAL)
+        return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")
 
     async def settle_mandate(
         self,
