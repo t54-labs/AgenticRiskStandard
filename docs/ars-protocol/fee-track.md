@@ -25,6 +25,10 @@ FEE_AWAIT_LOCK → FEE_ESCROW_LOCKED → FEE_DELIVERED → FEE_SETTLED_RELEASE
 
 The settlement action must match the evaluation verdict. A `pass` verdict requires a `release` action. A `fail` verdict requires a `refund` action. The server enforces this and rejects mismatched actions with a 400 error.
 
+## Automatic Collateral Handling
+
+When collateral is locked (via the principal track), fee settlement automatically handles it. There is no separate collateral settlement step. On `release` (pass verdict), the server unlocks collateral and returns it to the business agent. On `refund` (fail verdict), the server slashes collateral to a protocol treasury. This ensures collateral is always resolved alongside the fee, preventing orphaned deposits.
+
 ## Ordering Constraints
 
 The state machine enforces strict ordering:

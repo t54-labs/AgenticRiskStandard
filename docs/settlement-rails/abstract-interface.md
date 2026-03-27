@@ -57,6 +57,8 @@ class SettlementLayer(ABC):
 
 The optional `payment_payload` parameter allows live implementations to include rail-specific transfer data (e.g., an x402 payment authorization). Mock implementations ignore it.
 
+Note that `unlock_collateral` and `slash_collateral` are called automatically by the server during fee settlement. When the fee is settled with `release` (pass verdict), the server calls `unlock_collateral` to return funds to the business agent. When settled with `refund` (fail verdict), the server calls `slash_collateral` to seize funds to a treasury. No client action is required for collateral resolution.
+
 ## Result Types
 
 ```python

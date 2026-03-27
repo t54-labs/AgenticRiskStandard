@@ -437,7 +437,7 @@ All subsequent endpoints accept a `SignedActionEnvelope`:
 
 In `ap2/server/`, the fee lock uses the **cart total** from the completed mandate as the escrow amount, with the **merchant** as payee. The fee lock and UW request are gated on mandate completion (`PAYMENT_SIGNED`).
 
-Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`.
+Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`. When collateral is locked, fee settlement automatically handles it: `release` unlocks collateral (returned to business agent), `refund` slashes collateral (seized to treasury).
 
 ### Principal Track Endpoints (fund-moving jobs)
 

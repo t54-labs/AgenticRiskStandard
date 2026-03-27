@@ -66,3 +66,5 @@ In all override cases, the transaction continues without underwriter protection.
 ## Collateral as Delivery Guarantee
 
 Collateral is locked by the **business agent** (not the requestor). It represents the agent's skin in the game: if they fail to deliver, the collateral is slashed to a protocol treasury. If delivery succeeds, the collateral is returned to the business agent. This aligns incentives: the business agent has a financial stake in successful delivery beyond just the fee.
+
+Collateral resolution is automatic. When the fee is settled (the final step of the fee track), the server checks whether collateral exists and handles it in the same operation. A `release` action (pass verdict) unlocks collateral and returns it. A `refund` action (fail verdict) slashes collateral to treasury. No separate collateral settlement event is needed from any participant.

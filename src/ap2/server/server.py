@@ -207,13 +207,23 @@ def _register_override_routes(application: FastAPI) -> None:
         else:
             result = await sl.refund_fee(job_id)
 
+        # Auto-handle collateral based on verdict
+        collateral_result = None
+        if state.collateral_ref:
+            if action == "release":
+                collateral_result = await sl.unlock_collateral(job_id)
+            else:
+                collateral_result = await sl.slash_collateral(job_id, "treasury")
+
         payload = {**envelope.payload, "settlement_ref": result.ref}
+        if collateral_result:
+            payload["collateral_settlement_ref"] = collateral_result.ref
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
 
         events = store.get_events(job_id)
         new_state = derive_ap2_job_state(events)
-        return {
+        resp = {
             "job_id": job_id,
             "phase": new_state.phase.value,
             "fee_track_state": new_state.fee_track_state.value
@@ -221,6 +231,9 @@ def _register_override_routes(application: FastAPI) -> None:
             else None,
             "settlement_ref": result.ref,
         }
+        if collateral_result:
+            resp["collateral_settlement_ref"] = collateral_result.ref
+        return resp
 
     @application.post("/jobs/{job_id}/uw/collateral/lock")
     async def lock_collateral(

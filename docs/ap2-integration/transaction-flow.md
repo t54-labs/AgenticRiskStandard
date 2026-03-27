@@ -30,7 +30,7 @@ After mandate completion, the fee track handles the actual money movement:
 1. **User locks fee escrow.** The escrowed amount is the cart total from the mandate (not the pre-agreed fee in the agreement). The payee is the merchant.
 2. **Merchant delivers goods** by submitting a deliverable reference (e.g., order confirmation, shipping tracking).
 3. **Evaluator evaluates** the delivery and issues a pass or fail verdict.
-4. **Fee is settled.** On pass, the escrowed funds are released to the merchant. On fail, they are refunded to the user.
+4. **Fee is settled.** On pass, the escrowed funds are released to the merchant. On fail, they are refunded to the user. If collateral was locked, it is automatically handled: unlocked on pass (returned to merchant) or slashed on fail (seized to treasury).
 
 The job reaches the `CLOSED` phase.
 
@@ -45,7 +45,7 @@ When the IntentMandate has `requires_principal = True` and the agreement include
 5. After multi-party approval, the **principal is released** to the merchant.
 6. **Merchant submits execution evidence** proving the funds were used as intended.
 
-After evaluation: collateral is refunded to the merchant on pass, or slashed to treasury on fail.
+Collateral handling is automatic: when the fee is settled, the server unlocks collateral on pass (returned to merchant) or slashes it on fail (seized to treasury). No separate action is needed.
 
 ## Enforcement Gates
 
