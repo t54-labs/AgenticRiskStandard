@@ -202,6 +202,6 @@ class TestUWFlowViaSdk:
         # User pays premium
         user.pay_premium(job.job_id, job.agreement_hash, "premium_ref_123")
 
-        # Check state
+        # Happy path: auto-RELEASABLE after premium paid (no approval needed)
         state = user.get_job(job.job_id)
-        assert state["principal_track_state"] == "APPROVAL_PENDING"
+        assert state["principal_track_state"] == "RELEASABLE"

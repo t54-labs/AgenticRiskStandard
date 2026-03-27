@@ -477,13 +477,9 @@ def test_uw_happy_approve_no_collateral(
     uw_dec = _uw_decide(client, job_id, agr_hash, uw_sk, approve=True, premium=50)
     assert uw_dec["principal_track_state"] == "PREMIUM_PENDING"
 
-    # Pay premium
+    # Pay premium → auto-RELEASABLE (happy path, no approval needed)
     prem = _pay_premium(client, job_id, agr_hash, req_sk)
-    assert prem["principal_track_state"] == "APPROVAL_PENDING"
-
-    # Requestor approves release
-    rel = _approve_release(client, job_id, agr_hash, req_sk)
-    assert rel["principal_track_state"] == "RELEASABLE"
+    assert prem["principal_track_state"] == "RELEASABLE"
 
     # Settlement layer releases principal
     xfer = _release_principal(client, job_id, agr_hash, settle_sk)
@@ -533,12 +529,11 @@ def test_uw_happy_approve_with_collateral(
     assert resp.status_code == 200, resp.json()
     assert "collateral_ref" in resp.json()
 
-    # State should be APPROVAL_PENDING
+    # State should be RELEASABLE (happy path, auto-release)
     state = client.get(f"/jobs/{job_id}").json()
-    assert state["principal_track_state"] == "APPROVAL_PENDING"
+    assert state["principal_track_state"] == "RELEASABLE"
 
-    # Approve + release
-    _approve_release(client, job_id, agr_hash, req_sk)
+    # Release principal (no approval needed in happy path)
     xfer = _release_principal(client, job_id, agr_hash, settle_sk)
     assert "transfer_ref" in xfer
 
@@ -726,7 +721,7 @@ def test_wrong_role_uw_decide(
     assert resp.status_code == 403
 
 
-def test_cannot_release_before_approval(
+def test_cannot_release_before_approval_in_override_path(
     client,
     requestor_keys,
     agent_keys,
@@ -734,7 +729,7 @@ def test_cannot_release_before_approval(
     underwriter_keys,
     settlement_keys,
 ):
-    """PRINCIPAL_RELEASED requires RELEASABLE state."""
+    """In override path, PRINCIPAL_RELEASED requires user approval first."""
     req_sk, req_pk = requestor_keys
     agent_sk, agent_pk = agent_keys
     _, eval_pk = evaluator_keys
@@ -747,9 +742,20 @@ def test_cannot_release_before_approval(
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
     _uw_request(client, job_id, agr_hash, agent_sk)
-    _uw_decide(client, job_id, agr_hash, uw_sk, approve=True)
+    # UW rejects → override path
+    _uw_decide(client, job_id, agr_hash, uw_sk, approve=False)
 
-    # Try to release without requestor approval — should fail
+    # Override
+    env = make_envelope(
+        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, req_sk,
+    )
+    client.post(f"/jobs/{job_id}/uw/override", json=env)
+
+    # State should be APPROVAL_PENDING (override path requires approval)
+    state = client.get(f"/jobs/{job_id}").json()
+    assert state["principal_track_state"] == "APPROVAL_PENDING"
+
+    # Try to release without approval — should fail
     env = make_envelope(EventType.PRINCIPAL_RELEASED, job_id, agr_hash, {}, settle_sk)
     resp = client.post(f"/jobs/{job_id}/principal/release", json=env)
     assert resp.status_code == 409

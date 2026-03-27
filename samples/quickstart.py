@@ -158,8 +158,10 @@ def main():
     print("Exchange service locked $50.00 collateral (delivery guarantee)")
     print("  If exchange fails, collateral is slashed")
 
-    user.approve_release(job.job_id, job.agreement_hash)
-    print("User approved $100 principal release to exchange service")
+    # Happy path: coverage satisfied → auto-RELEASABLE (no user approval needed)
+    # Principal release happens server-side
+    state = user.get_job(job.job_id)
+    print(f"Principal track: {state['principal_track_state']} (auto-released)")
     print("  Exchange service now has $100 to convert to CAD")
 
     # ── Phase 5: Delivery + Evaluation ───────────────────────────

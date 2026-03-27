@@ -109,10 +109,6 @@ def _requestor_approved(acc: _Acc) -> bool:
     return acc.release_approvals.get(acc.agreement.requestor_pubkey, False)
 
 
-def _release_ready(acc: _Acc) -> bool:
-    return _requestor_approved(acc) and (_coverage_bound(acc) or _override_ack(acc))
-
-
 def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
     if not _agreement_bound(acc) or not _is_fund_moving(acc):
         return None
@@ -128,21 +124,22 @@ def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
         return PrincipalTrackState.UW_REVIEW
 
     if not acc.uw_decision.get("approve"):
-        # rejected underwriting → override path
+        # rejected underwriting → override path (requires user approval)
         if acc.override is None:
             return PrincipalTrackState.OVERRIDE_PENDING
-        if _release_ready(acc):
+        if _requestor_approved(acc):
             return PrincipalTrackState.RELEASABLE
         return PrincipalTrackState.APPROVAL_PENDING
 
     # approved underwriting
+    _used_override = False
     premium = acc.uw_decision.get("premium", 0) or 0
     if premium > 0 and acc.premium_ref is None:
         if acc.premium_refused:
             # premium refused → need override to proceed
             if not _override_ack(acc):
                 return PrincipalTrackState.OVERRIDE_PENDING
-            # override accepted, proceed past premium gate
+            _used_override = True
         else:
             return PrincipalTrackState.PREMIUM_PENDING
 
@@ -152,12 +149,16 @@ def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
             # collateral refused → need override to proceed
             if not _override_ack(acc):
                 return PrincipalTrackState.OVERRIDE_PENDING
-            # override accepted, proceed past collateral gate
+            _used_override = True
         else:
             return PrincipalTrackState.COLLATERAL_REQUESTED
 
-    # gated conditions satisfied
-    if _release_ready(acc):
+    # Happy path (no override): auto-release when coverage is satisfied
+    if not _used_override:
+        return PrincipalTrackState.RELEASABLE
+
+    # Override path: require user approval before release
+    if _requestor_approved(acc):
         return PrincipalTrackState.RELEASABLE
     return PrincipalTrackState.APPROVAL_PENDING
 
