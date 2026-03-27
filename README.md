@@ -50,7 +50,7 @@ ARS defines six participant roles. Each role is identified by an Ed25519 public 
 | Role | Description |
 |------|-------------|
 | **Requestor** | Creates jobs, locks fee escrow, pays premiums, approves principal release, submits override decisions |
-| **Business Agent** | Signs agreements, submits deliverables, requests underwriting, submits execution evidence |
+| **Business Agent** | Signs agreements, submits deliverables, requests underwriting, locks collateral, submits execution evidence |
 | **Evaluator** | Independently evaluates deliverable quality (pass/fail verdict) |
 | **Underwriter** | Assesses risk for fund-moving jobs; approves/rejects with premium and collateral terms |
 | **Settlement Layer** | Executes principal fund transfers after all approvals are in place |
@@ -85,7 +85,7 @@ Jobs with `job_type: "fund-moving"` or a `principal` field activate a second tra
 ```
 UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL_REQUESTED]
        │                  │               │                        │
-   Agent requests    Underwriter      Requestor pays         Requestor locks
+   Agent requests    Underwriter      Requestor pays         Business agent locks
    underwriting      decides          premium (if any)       collateral (if any)
                          │
                     If rejected ──> OVERRIDE_PENDING ──> Requestor decides override
@@ -446,7 +446,7 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/request` | `UW_REQUESTED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/decide` | `UW_DECIDED` | Underwriter | `{"approve": true/false, "premium": 0, "collateral_required": 0}` |
 | `POST` | `/jobs/{id}/uw/premium` | `PREMIUM_PAID` | Requestor | `{"premium_ref": "..."}` |
-| `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Requestor | `{}` |
+| `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |
 | `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` |

@@ -350,8 +350,8 @@ def validate_transition(state: JobStateView, envelope: SignedActionEnvelope) -> 
     elif et == EventType.COLLATERAL_LOCKED:
         if state.principal_track_state != PrincipalTrackState.COLLATERAL_REQUESTED:
             raise ConflictError("Collateral lock requires COLLATERAL_REQUESTED state")
-        if agr and envelope.actor != agr.requestor_pubkey:
-            raise ForbiddenError("Only requestor can lock collateral")
+        if agr and envelope.actor != agr.business_agent_pubkey:
+            raise ForbiddenError("Only business agent can lock collateral")
 
     elif et == EventType.COLLATERAL_REFUSED:
         if state.principal_track_state != PrincipalTrackState.COLLATERAL_REQUESTED:

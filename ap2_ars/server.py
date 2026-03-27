@@ -445,7 +445,7 @@ def _register_base_routes(application: FastAPI) -> None:
             job_id,
             amt,
             state.agreement.principal.currency,
-            payer_addr=state.agreement.user_pubkey,
+            payer_addr=state.agreement.merchant_pubkey,
         )
 
         payload = {

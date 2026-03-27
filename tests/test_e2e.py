@@ -527,8 +527,8 @@ def test_uw_happy_approve_with_collateral(
     state = client.get(f"/jobs/{job_id}").json()
     assert state["principal_track_state"] == "COLLATERAL_REQUESTED"
 
-    # Lock collateral
-    env = make_envelope(EventType.COLLATERAL_LOCKED, job_id, agr_hash, {}, req_sk)
+    # Lock collateral (business agent locks their own money as guarantee)
+    env = make_envelope(EventType.COLLATERAL_LOCKED, job_id, agr_hash, {}, agent_sk)
     resp = client.post(f"/jobs/{job_id}/uw/collateral/lock", json=env)
     assert resp.status_code == 200, resp.json()
     assert "collateral_ref" in resp.json()
