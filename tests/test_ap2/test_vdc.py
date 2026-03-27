@@ -6,8 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 from nacl.signing import SigningKey
 
-from ap2_ars.models import CartLineItem
-from ap2_ars.vdc import (
+from ap2.server.models import CartLineItem
+from ap2.server.vdc import (
     compute_mandate_hash,
     create_cart_mandate,
     create_intent_mandate,

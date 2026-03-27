@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from ap2_ars.constraints import ConstraintEngine
-from ap2_ars.models import CartLineItem, CartMandate, IntentMandate, VDCHeader
+from ap2.server.constraints import ConstraintEngine
+from ap2.server.models import CartLineItem, CartMandate, IntentMandate, VDCHeader
 
 
 def _make_intent(budget=5000, merchants=None, sku_patterns=None, ttl_seconds=3600):

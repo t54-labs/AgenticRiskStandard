@@ -7,8 +7,8 @@ from nacl.signing import SigningKey
 
 from ars.errors import BadRequestError, ForbiddenError
 
-from ap2_ars.models import AP2AgreementDraft, FeeTerms, Modality
-from ap2_ars.roles import AP2Role, RoleRegistry
+from ap2.server.models import AP2AgreementDraft, FeeTerms, Modality
+from ap2.server.roles import AP2Role, RoleRegistry
 
 
 def _make_agreement(**overrides) -> AP2AgreementDraft:

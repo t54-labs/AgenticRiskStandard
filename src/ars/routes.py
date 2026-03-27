@@ -67,7 +67,7 @@ def create_shared_router(
     get_store: Callable[[Request], EventStore],
     event_types: dict[str, str],
 ) -> APIRouter:
-    """Create an APIRouter with the 14 routes shared between ars/ and ap2_ars/.
+    """Create an APIRouter with the 14 routes shared between ars/ and ap2/.
 
     Parameters:
         derive_state: (events) -> JobStateView — state derivation function

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ap2_ars.x402 import MockX402Settlement, PaymentRequirement, USDC_ADDRESSES
+from ap2.server.x402 import MockX402Settlement, PaymentRequirement, USDC_ADDRESSES
 
 
 @pytest.mark.asyncio

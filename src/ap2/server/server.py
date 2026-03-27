@@ -31,7 +31,7 @@ from .state import derive_ap2_job_state, validate_ap2_transition
 
 
 def create_app(
-    db_path: str = "ap2_ars.db", settlement: Optional[SettlementLayer] = None,
+    db_path: str = "ap2.db", settlement: Optional[SettlementLayer] = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):

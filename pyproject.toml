@@ -1,8 +1,9 @@
 [project]
 name = "ars"
 version = "0.1.0"
-description = "Agentic Risk Standard – v1 escrow-only fee track"
+description = "Agentic Risk Standard — event-sourced settlement protocol for trustworthy AI agent transactions"
 requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
@@ -15,19 +16,39 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
+    "ruff>=0.4",
 ]
 ap2 = [
     "x402[fastapi,evm]>=2.5",
     "web3>=6.0",
 ]
+client = [
+    "httpx>=0.27",
+    "click>=8.0",
+]
+
+[project.scripts]
+ars-cli = "ars_client.cli:main"
+ap2-cli = "ap2.client.cli:main"
+
+[project.urls]
+Repository = "https://github.com/anthropics/ARS"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["ars*", "ap2_ars*"]
+where = ["src"]
+include = ["ars*", "ap2*"]

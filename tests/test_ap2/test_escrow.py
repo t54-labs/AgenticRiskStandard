@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ap2_ars.escrow import DepositStatus, DepositType, MockEscrowClient
+from ap2.server.escrow import DepositStatus, DepositType, MockEscrowClient
 
 
 @pytest.mark.asyncio

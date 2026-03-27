@@ -4,25 +4,20 @@ A settlement-layer protocol for trustworthy AI agent services. ARS provides cryp
 
 **ARS is designed as an abstract protocol with pluggable concrete implementations.** The `ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
 
-This repo ships with one concrete implementation: **`ap2_ars/`**, which realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract.
+This repo ships with one concrete implementation: **`ap2/server/`**, which realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract.
 
 ## Abstract vs. Concrete
 
 ```
-ars/          Abstract protocol layer (models, state machine, crypto, event store)
-  |              - Generic event types, agreement structure, role-based validation
-  |              - Mock vaults for development/testing
-  |              - Pluggable: any concrete implementation can inherit from it
-  |
-ap2_ars/      Concrete AP2 realization (inherits from ars/)
-                 - AP2 mandates (IntentMandate, CartMandate, PaymentMandate)
-                 - 6-actor model with cryptographic agent-payment firewall
-                 - x402 payment rail (Coinbase SDK, on-chain USDC via EIP-3009)
-                 - ARSEscrow.sol smart contract (hold/release/refund/slash)
-                 - Dual modality: human-present and human-NOT-present flows
+src/
+  ars/              Abstract protocol layer (models, state machine, crypto, event store)
+  ars_client/       Abstract client SDK (RequestorClient, BusinessAgentClient, ...)
+  ap2/
+    server/         Concrete AP2 server (mandates, roles, x402, escrow)
+    client/         Concrete AP2 client SDK (UserClient, MerchantClient, ...)
 ```
 
-`ap2_ars/` extends `ars/` through proper inheritance:
+`ap2/server/` extends `ars/` through proper inheritance:
 - Uses `ars.models.SignedActionEnvelope` and `ars.models.Event` directly (no reimplementation)
 - `AP2JobStateView` inherits from `ars.models.JobStateView`, adding mandate track fields
 - `AP2EventType` is dynamically composed from base `EventType` + AP2-specific events (no duplication)
@@ -110,33 +105,35 @@ pip install -e ".[dev]"
 uvicorn ars.server:app --host 0.0.0.0 --port 8000
 
 # Run base tests
-pytest tests/test_e2e.py -v
+pytest tests/test_ars/ -v
 ```
 
 ### Architecture
 
 ```
-ars/
-  models.py    # Pydantic models, enums (JobPhase, EventType, etc.)
-  crypto.py    # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
-  server.py    # FastAPI app with all endpoints
-  state.py     # Event-sourced state derivation + transition validation
-  store.py     # SQLite append-only event store
-  vault.py     # Mock escrow, collateral, and principal vaults
-  errors.py    # HTTP error hierarchy
+src/ars/
+  models.py      # Pydantic models, enums (JobPhase, EventType, etc.)
+  crypto.py      # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
+  routes.py      # Shared APIRouter factory (14 endpoints reused by ap2/)
+  server.py      # FastAPI app with override endpoints
+  state.py       # Event-sourced state derivation + transition validation
+  store.py       # SQLite append-only event store
+  escrow.py      # Escrow ABC + MockEscrowClient
+  settlement.py  # Settlement layer ABC + MockSettlementLayer
+  errors.py      # HTTP error hierarchy
 ```
 
 **Event sourcing**: The server stores every signed action as an immutable event. Job state is never stored directly — it is always derived by replaying all events for a job through `derive_job_state()`. This makes the system auditable and tamper-evident.
 
 **State machine**: `validate_transition()` enforces that each action is only allowed in the correct phase/state and by the correct role. Invalid transitions return `409 Conflict`; unauthorized actors get `403 Forbidden`.
 
-**Mock vaults**: The abstract implementation uses in-memory mock vaults (`MockEscrowVault`, `MockCollateralVault`, `MockPrincipalVault`). Concrete implementations replace these with real settlement — see `ap2_ars/` below.
+**Mock vaults**: The abstract implementation uses in-memory mock vaults (`MockEscrowVault`, `MockCollateralVault`, `MockPrincipalVault`). Concrete implementations replace these with real settlement — see `ap2/server/` below.
 
 ---
 
-## ap2_ars/ — Concrete AP2 Implementation
+## ap2/server/ — Concrete AP2 Implementation
 
-`ap2_ars/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `ars/` primitives and adds three layers:
+`ap2/server/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `ars/` primitives and adds three layers:
 
 ### 1. AP2 Mandates (Authorization Layer)
 
@@ -216,7 +213,7 @@ User pre-signs IntentMandate (budget, merchants, SKUs, TTL, requires_principal)
 
 ### AP2-Specific Endpoints
 
-In addition to all base ARS endpoints, `ap2_ars/` adds mandate endpoints. After mandate completion, the base ARS fee/principal endpoints handle settlement:
+In addition to all base ARS endpoints, `ap2/server/` adds mandate endpoints. After mandate completion, the base ARS fee/principal endpoints handle settlement:
 
 | Method | Path | Event Type | Actor |
 |--------|------|-----------|-------|
@@ -236,7 +233,7 @@ In addition to all base ARS endpoints, `ap2_ars/` adds mandate endpoints. After 
 pip install -e ".[dev,ap2]"
 
 # Run the AP2 server (mock settlement for development)
-uvicorn ap2_ars.server:app --host 0.0.0.0 --port 8000
+uvicorn ap2.server.server:app --host 0.0.0.0 --port 8000
 
 # Run AP2 tests
 pytest tests/test_ap2/ -v
@@ -248,10 +245,10 @@ pytest tests/ -v
 For real on-chain settlement, pass a configured `SettlementLayer`:
 
 ```python
-from ap2_ars.server import create_app
-from ap2_ars.x402 import LiveX402Settlement
-from ap2_ars.escrow import LiveEscrowClient
-from ap2_ars.settlement import LiveSettlementLayer
+from ap2.server.server import create_app
+from ap2.server.x402 import LiveX402Settlement
+from ap2.server.escrow import LiveEscrowClient
+from ap2.server.settlement import LiveSettlementLayer
 
 x402 = LiveX402Settlement(
     facilitator_url="https://api.developer.coinbase.com/x402/facilitator",
@@ -261,7 +258,7 @@ x402 = LiveX402Settlement(
 escrow = LiveEscrowClient(
     rpc_url="https://mainnet.base.org",
     contract_address="<deployed-ARSEscrow-address>",
-    abi=...,  # load from ap2_ars/contracts/ars_escrow_abi.json
+    abi=...,  # load from ap2/server/contracts/ars_escrow_abi.json
     operator_key="<operator-private-key>",
 )
 settlement = LiveSettlementLayer(x402=x402, escrow=escrow)
@@ -271,19 +268,22 @@ app = create_app(settlement=settlement)
 ### Architecture
 
 ```
-ap2_ars/
-  models.py        # AP2AgreementDraft, VDC types, AP2EventType (derived from base), AP2JobStateView
-  vdc.py           # VDC creation, Ed25519 signing/verification, TTL enforcement
-  roles.py         # 6-actor RoleRegistry + cryptographic firewall
-  constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
-  x402.py          # x402 payment rail (internal transport) — LiveX402Settlement + Mock
-  escrow.py        # Python interface to ARSEscrow contract — LiveEscrowClient + Mock
-  settlement.py    # Unified SettlementLayer composing x402 + escrow for fee/principal tracks
-  state.py         # Composite state machine: mandate authorization + base fee/principal tracks
-  server.py        # FastAPI app — base ARS endpoints + AP2 mandate endpoints
-  contracts/
-    ARSEscrow.sol       # Solidity escrow contract (USDC hold/release/refund/slash)
-    ars_escrow_abi.json  # Pre-compiled contract ABI
+src/ap2/
+  server/
+    models.py        # AP2AgreementDraft, VDC types, AP2EventType, AP2JobStateView
+    vdc.py           # VDC creation, Ed25519 signing/verification, TTL enforcement
+    roles.py         # 6-actor RoleRegistry + cryptographic firewall
+    constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
+    x402.py          # x402 payment rail (internal transport)
+    escrow.py        # LiveEscrowClient (web3.py, re-exports from ars.escrow)
+    settlement.py    # LiveSettlementLayer (x402 + escrow, re-exports from ars.settlement)
+    state.py         # Composite state machine: mandate authorization + base tracks
+    server.py        # FastAPI app: shared router + override + mandate endpoints
+  client/
+    user.py          # UserClient (extends RequestorClient with mandate methods)
+    merchant.py      # MerchantClient (extends BusinessAgentClient with cart methods)
+    shopping_agent.py # ShoppingAgentClient (read-only orchestrator)
+    cli.py           # AP2 CLI extending base CLI
 ```
 
 ---
@@ -293,9 +293,9 @@ ap2_ars/
 To build a new realization of ARS (e.g., using a different payment rail or blockchain):
 
 1. **Import from `ars/`**: Use `SignedActionEnvelope`, `Event`, `EventStore`, `JobStateView`, `derive_job_state()`, `validate_transition()` directly
-2. **Define your agreement model**: Map your domain's actors to ARS roles via a bridging function (see `ap2_ars/state.py:_to_base_agreement()`)
+2. **Define your agreement model**: Map your domain's actors to ARS roles via a bridging function (see `ap2/server/state.py:_to_base_agreement()`)
 3. **Extend `JobStateView`**: Add fields for your protocol-specific state
-4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `ap2_ars/settlement.py`)
+4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `ap2/server/settlement.py`)
 5. **Add new event types**: String-typed events pass through the base store/state unchanged; add your own state machine for domain-specific transitions
 
 ---
@@ -435,7 +435,7 @@ All subsequent endpoints accept a `SignedActionEnvelope`:
 | `POST` | `/jobs/{id}/evaluate` | `OUTCOME_EVALUATED` | Evaluator | `{"verdict": "pass" or "fail"}` |
 | `POST` | `/jobs/{id}/fee/settle` | `FEE_SETTLED` | Any | `{"action": "release" or "refund"}` |
 
-In `ap2_ars/`, the fee lock uses the **cart total** from the completed mandate as the escrow amount, with the **merchant** as payee. The fee lock and UW request are gated on mandate completion (`PAYMENT_SIGNED`).
+In `ap2/server/`, the fee lock uses the **cart total** from the completed mandate as the escrow amount, with the **merchant** as payee. The fee lock and UW request are gated on mandate completion (`PAYMENT_SIGNED`).
 
 Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`.
 

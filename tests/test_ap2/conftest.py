@@ -10,7 +10,7 @@ from nacl.signing import SigningKey
 
 from ars.crypto import canonicalize, sign_envelope
 
-from ap2_ars.server import create_app
+from ap2.server.server import create_app
 
 
 # ── Key fixtures (8 actors) ──────────────────────────────────────────────────
