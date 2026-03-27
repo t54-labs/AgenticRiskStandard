@@ -8,13 +8,10 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 
-from ars.crypto import (
-    compute_agreement_hash,
-    envelope_body,
-    verify_envelope_signature,
-)
+from ars.crypto import compute_agreement_hash, verify_envelope_signature
 from ars.errors import AuthError, BadRequestError, ConflictError, NotFoundError
 from ars.models import CreateJobRequest, SignedActionEnvelope
+from ars.routes import create_shared_router, make_append_validated, verify_sig
 from ars.store import EventStore
 
 from .constraints import ConstraintEngine
@@ -44,8 +41,23 @@ def create_app(
         yield
 
     application = FastAPI(title="AP2-ARS", version="0.1.0", lifespan=lifespan)
-    _register_base_routes(application)
+
+    # Shared routes (proposals, signatures, deliverable, evaluate, UW, GET, etc.)
+    shared = create_shared_router(
+        derive_state=derive_ap2_job_state,
+        validate_transition=validate_ap2_transition,
+        validate_agreement_draft=lambda d: AP2AgreementDraft(**d),
+        get_store=_store,
+        event_types={m.name: m.value for m in AP2EventType},
+    )
+    application.include_router(shared)
+
+    # Override routes (create_job, fee lock/settle, collateral lock, principal release)
+    _register_override_routes(application)
+
+    # AP2-only routes (mandates, constraints)
     _register_mandate_routes(application)
+
     return application
 
 
@@ -61,51 +73,16 @@ def _constraint_engine(request: Request) -> ConstraintEngine:
     return request.app.state.constraint_engine
 
 
-# ── Sig verification ─────────────────────────────────────────────────────────
+# Reusable _append_validated for mandate routes
+_append_validated = make_append_validated(
+    derive_ap2_job_state, validate_ap2_transition,
+)
 
 
-def _verify_sig(envelope: SignedActionEnvelope) -> None:
-    body = envelope_body(envelope.model_dump())
-    if not verify_envelope_signature(envelope.actor, body, envelope.signature):
-        raise AuthError()
+# ── Override routes (AP2-specific settlement) ────────────────────────────────
 
 
-# ── Generic append helper ────────────────────────────────────────────────────
-
-
-def _append_validated(
-    store: EventStore,
-    job_id: str,
-    envelope: SignedActionEnvelope,
-    expected_type: str,
-    extra_payload: dict | None = None,
-) -> dict:
-    """Verify sig -> validate transition -> append event -> re-derive state."""
-    if envelope.type != expected_type:
-        raise BadRequestError(f"Expected type {expected_type}")
-
-    _verify_sig(envelope)
-    envelope = envelope.model_copy(update={"job_id": job_id})
-
-    events = store.get_events(job_id)
-    state = derive_ap2_job_state(events)
-    validate_ap2_transition(state, envelope)
-
-    if extra_payload:
-        payload = {**envelope.payload, **extra_payload}
-        envelope = envelope.model_copy(update={"payload": payload})
-
-    store.append_event(envelope)
-
-    events = store.get_events(job_id)
-    new_state = derive_ap2_job_state(events)
-    return new_state
-
-
-# ── Base ARS routes (fee track + principal track) ─────────────────────────────
-
-
-def _register_base_routes(application: FastAPI) -> None:
+def _register_override_routes(application: FastAPI) -> None:
     @application.post("/jobs", status_code=201)
     async def create_job(req: CreateJobRequest, request: Request):
         if req.type != "JOB_CREATED":
@@ -157,53 +134,6 @@ def _register_base_routes(application: FastAPI) -> None:
             "modality": agreement.modality.value,
         }
 
-    @application.post("/jobs/{job_id}/proposals")
-    async def propose_agreement(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        if envelope.type != AP2EventType.PROPOSAL_SUBMITTED.value:
-            raise BadRequestError("Expected type PROPOSAL_SUBMITTED")
-
-        agreement_dict = envelope.payload.get("agreement")
-        if not agreement_dict:
-            raise BadRequestError("payload.agreement is required")
-        AP2AgreementDraft(**agreement_dict)
-
-        _verify_sig(envelope)
-
-        agr_hash = compute_agreement_hash(agreement_dict)
-        envelope = envelope.model_copy(
-            update={"job_id": job_id, "agreement_hash": agr_hash},
-        )
-
-        events = store.get_events(job_id)
-        state = derive_ap2_job_state(events)
-        validate_ap2_transition(state, envelope)
-
-        store.append_event(envelope)
-        return {"job_id": job_id, "agreement_hash": agr_hash}
-
-    @application.post("/jobs/{job_id}/signatures")
-    async def sign_agreement(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.AGREEMENT_SIGNED.value,
-        )
-        return {
-            "job_id": job_id,
-            "phase": new_state.phase.value,
-            "signatures": new_state.signatures,
-        }
-
     @application.post("/jobs/{job_id}/fee/lock")
     async def lock_fee(
         job_id: str, envelope: SignedActionEnvelope, request: Request,
@@ -215,7 +145,7 @@ def _register_base_routes(application: FastAPI) -> None:
         if envelope.type != AP2EventType.FEE_ESCROW_LOCKED.value:
             raise BadRequestError("Expected type FEE_ESCROW_LOCKED")
 
-        _verify_sig(envelope)
+        verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
         events = store.get_events(job_id)
@@ -229,9 +159,7 @@ def _register_base_routes(application: FastAPI) -> None:
         fee_amount = state.agreement.fee.amount
         fee_currency = state.agreement.fee.currency
         if state.cart_mandate:
-            from .models import CartMandate as _CM
-
-            _cart = _CM(**state.cart_mandate)
+            _cart = CartMandate(**state.cart_mandate)
             fee_amount = _cart.total
 
         lock_result = await sl.lock_fee(
@@ -252,50 +180,6 @@ def _register_base_routes(application: FastAPI) -> None:
             "lock_ref": lock_result.ref,
         }
 
-    @application.post("/jobs/{job_id}/deliverable")
-    async def submit_deliverable(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        if envelope.type != AP2EventType.DELIVERABLE_SUBMITTED.value:
-            raise BadRequestError("Expected type DELIVERABLE_SUBMITTED")
-        if not envelope.payload.get("deliverable_ref"):
-            raise BadRequestError("payload.deliverable_ref is required")
-
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.DELIVERABLE_SUBMITTED.value,
-        )
-        return {
-            "job_id": job_id,
-            "fee_track_state": "FEE_DELIVERED",
-            "deliverable_ref": envelope.payload["deliverable_ref"],
-        }
-
-    @application.post("/jobs/{job_id}/evaluate")
-    async def evaluate_outcome(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        if envelope.type != AP2EventType.OUTCOME_EVALUATED.value:
-            raise BadRequestError("Expected type OUTCOME_EVALUATED")
-        if "verdict" not in envelope.payload:
-            raise BadRequestError("payload.verdict is required")
-
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.OUTCOME_EVALUATED.value,
-        )
-        return {
-            "job_id": job_id,
-            "phase": "EVALUATION",
-            "verdict": envelope.payload["verdict"],
-        }
-
     @application.post("/jobs/{job_id}/fee/settle")
     async def settle_fee(
         job_id: str, envelope: SignedActionEnvelope, request: Request,
@@ -309,7 +193,7 @@ def _register_base_routes(application: FastAPI) -> None:
         if "action" not in envelope.payload:
             raise BadRequestError("payload.action is required")
 
-        _verify_sig(envelope)
+        verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
         events = store.get_events(job_id)
@@ -338,101 +222,6 @@ def _register_base_routes(application: FastAPI) -> None:
             "settlement_ref": result.ref,
         }
 
-    # GET endpoints
-    @application.get("/jobs/{job_id}")
-    async def get_job(job_id: str, request: Request):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_events(job_id)
-        state = derive_ap2_job_state(events)
-        return state.model_dump()
-
-    @application.get("/jobs/{job_id}/events")
-    async def get_events(job_id: str, request: Request):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        events = store.get_events(job_id)
-        return {"job_id": job_id, "events": [e.model_dump() for e in events]}
-
-    # UW / Principal track endpoints
-
-    @application.post("/jobs/{job_id}/uw/request")
-    async def request_uw(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.UW_REQUESTED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-        }
-
-    @application.post("/jobs/{job_id}/uw/decide")
-    async def uw_decide(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        if "approve" not in envelope.payload:
-            raise BadRequestError("payload.approve is required")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.UW_DECIDED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-            "approve": envelope.payload["approve"],
-        }
-
-    @application.post("/jobs/{job_id}/uw/premium")
-    async def pay_premium(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        premium_ref = envelope.payload.get("premium_ref")
-        if not premium_ref:
-            raise BadRequestError("payload.premium_ref is required")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.PREMIUM_PAID.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-            "premium_ref": premium_ref,
-        }
-
-    @application.post("/jobs/{job_id}/uw/premium/refuse")
-    async def refuse_premium(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.PREMIUM_REFUSED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-        }
-
     @application.post("/jobs/{job_id}/uw/collateral/lock")
     async def lock_collateral(
         job_id: str, envelope: SignedActionEnvelope, request: Request,
@@ -443,7 +232,7 @@ def _register_base_routes(application: FastAPI) -> None:
         if envelope.type != AP2EventType.COLLATERAL_LOCKED.value:
             raise BadRequestError("Expected type COLLATERAL_LOCKED")
 
-        _verify_sig(envelope)
+        verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
         events = store.get_events(job_id)
@@ -474,60 +263,6 @@ def _register_base_routes(application: FastAPI) -> None:
         store.append_event(envelope)
         return {"job_id": job_id, "collateral_ref": lock_result.ref}
 
-    @application.post("/jobs/{job_id}/uw/collateral/refuse")
-    async def refuse_collateral(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.COLLATERAL_REFUSED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-        }
-
-    @application.post("/jobs/{job_id}/uw/override")
-    async def override_decision(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        if "decision" not in envelope.payload:
-            raise BadRequestError("payload.decision is required")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.OVERRIDE_DECIDED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-            "decision": envelope.payload["decision"],
-        }
-
-    @application.post("/jobs/{job_id}/release/approve")
-    async def approve_release(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.RELEASE_APPROVED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-        }
-
     @application.post("/jobs/{job_id}/principal/release")
     async def release_principal(
         job_id: str, envelope: SignedActionEnvelope, request: Request,
@@ -538,7 +273,7 @@ def _register_base_routes(application: FastAPI) -> None:
         if envelope.type != AP2EventType.PRINCIPAL_RELEASED.value:
             raise BadRequestError("Expected type PRINCIPAL_RELEASED")
 
-        _verify_sig(envelope)
+        verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
         events = store.get_events(job_id)
@@ -564,28 +299,8 @@ def _register_base_routes(application: FastAPI) -> None:
         store.append_event(envelope)
         return {"job_id": job_id, "transfer_ref": result.ref}
 
-    @application.post("/jobs/{job_id}/execution-evidence")
-    async def submit_execution_evidence(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-        if not envelope.payload.get("exec_evidence_ref"):
-            raise BadRequestError("payload.exec_evidence_ref is required")
-        new_state = _append_validated(
-            store, job_id, envelope, AP2EventType.EXECUTION_EVIDENCE_SUBMITTED.value,
-        )
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-            "exec_evidence_ref": envelope.payload["exec_evidence_ref"],
-        }
 
-
-# ── Mandate routes ───────────────────────────────────────────────────────────
+# ── Mandate routes (AP2-only) ────────────────────────────────────────────────
 
 
 def _register_mandate_routes(application: FastAPI) -> None:
@@ -634,7 +349,7 @@ def _register_mandate_routes(application: FastAPI) -> None:
         if envelope.type != AP2EventType.CART_MANDATE_SIGNED.value:
             raise BadRequestError("Expected type CART_MANDATE_SIGNED")
 
-        _verify_sig(envelope)
+        verify_sig(envelope)
         envelope = envelope.model_copy(update={"job_id": job_id})
 
         events = store.get_events(job_id)
