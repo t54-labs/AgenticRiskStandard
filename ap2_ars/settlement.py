@@ -23,13 +23,6 @@ class SettleActionResult:
     ref: str  # settlement_ref
 
 
-@dataclass
-class MandateSettleResult:
-    x402_tx: str
-    network: str
-    payer: str
-
-
 # ── Abstract interface ────────────────────────────────────────────────────────
 
 
@@ -87,18 +80,6 @@ class SettlementLayer(ABC):
         destination: Optional[str],
         payment_payload: Optional[dict] = None,
     ) -> SettleActionResult:
-        ...
-
-    # Direct mandate payment (no escrow)
-    @abstractmethod
-    async def settle_mandate(
-        self,
-        job_id: str,
-        amount: int,
-        currency: str,
-        payment_payload: dict,
-        payment_requirement: dict,
-    ) -> MandateSettleResult:
         ...
 
 
@@ -193,27 +174,6 @@ class LiveSettlementLayer(SettlementLayer):
         release_tx = await self._escrow.release(job_id, DepositType.PRINCIPAL)
         return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")
 
-    async def settle_mandate(
-        self,
-        job_id: str,
-        amount: int,
-        currency: str,
-        payment_payload: dict,
-        payment_requirement: dict,
-    ) -> MandateSettleResult:
-        # Direct x402 payment — no escrow, one-shot to merchant
-        verify = await self._x402.verify(job_id, payment_payload, payment_requirement)
-        if not verify.valid:
-            raise ValueError(f"Payment verification failed: {verify.invalid_reason}")
-        result = await self._x402.settle(job_id, payment_payload, payment_requirement)
-        if not result.success:
-            raise ValueError("x402 settlement failed")
-        return MandateSettleResult(
-            x402_tx=result.transaction or "",
-            network=result.network or "",
-            payer=result.payer or "",
-        )
-
 
 # ── Mock implementation (tests) ──────────────────────────────────────────────
 
@@ -281,19 +241,3 @@ class MockSettlementLayer(SettlementLayer):
         )
         release_tx = await self._escrow.release(job_id, DepositType.PRINCIPAL)
         return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")
-
-    async def settle_mandate(
-        self,
-        job_id: str,
-        amount: int,
-        currency: str,
-        payment_payload: dict,
-        payment_requirement: dict,
-    ) -> MandateSettleResult:
-        await self._x402.verify(job_id, payment_payload, payment_requirement)
-        result = await self._x402.settle(job_id, payment_payload, payment_requirement)
-        return MandateSettleResult(
-            x402_tx=result.transaction or "",
-            network=result.network or "",
-            payer=result.payer or "",
-        )

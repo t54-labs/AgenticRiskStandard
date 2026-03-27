@@ -46,7 +46,6 @@ def create_app(
     application = FastAPI(title="AP2-ARS", version="0.1.0", lifespan=lifespan)
     _register_base_routes(application)
     _register_mandate_routes(application)
-    _register_settlement_routes(application)
     return application
 
 
@@ -225,12 +224,22 @@ def _register_base_routes(application: FastAPI) -> None:
 
         assert state.agreement is not None
         sl = _settlement(request)
+
+        # Use cart total from mandate if available, otherwise agreement fee
+        fee_amount = state.agreement.fee.amount
+        fee_currency = state.agreement.fee.currency
+        if state.cart_mandate:
+            from .models import CartMandate as _CM
+
+            _cart = _CM(**state.cart_mandate)
+            fee_amount = _cart.total
+
         lock_result = await sl.lock_fee(
             job_id,
-            state.agreement.fee.amount,
-            state.agreement.fee.currency,
+            fee_amount,
+            fee_currency,
             payer_addr=state.agreement.user_pubkey,
-            payee_addr=state.agreement.shopping_agent_pubkey,
+            payee_addr=state.agreement.merchant_pubkey,
         )
 
         payload = {**envelope.payload, "lock_ref": lock_result.ref}
@@ -724,99 +733,6 @@ def _register_mandate_routes(application: FastAPI) -> None:
         cart = CartMandate(**state.cart_mandate)
         result = engine.check(intent, cart)
         return {"job_id": job_id, "result": result.model_dump()}
-
-
-# ── Settlement routes ────────────────────────────────────────────────────────
-
-
-def _register_settlement_routes(application: FastAPI) -> None:
-    @application.post("/jobs/{job_id}/settlement/x402/initiate")
-    async def initiate_x402(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        if envelope.type != AP2EventType.SETTLEMENT_402_INITIATED.value:
-            raise BadRequestError("Expected type SETTLEMENT_402_INITIATED")
-
-        _verify_sig(envelope)
-        envelope = envelope.model_copy(update={"job_id": job_id})
-
-        events = store.get_events(job_id)
-        state = derive_ap2_job_state(events)
-        validate_ap2_transition(state, envelope)
-
-        sl = _settlement(request)
-        assert state.agreement is not None
-
-        payment_payload = envelope.payload.get("payment_payload", {})
-        payment_requirement = envelope.payload.get("payment_requirement", {})
-
-        result = await sl.settle_mandate(
-            job_id,
-            state.agreement.fee.amount,
-            state.agreement.fee.currency,
-            payment_payload,
-            payment_requirement,
-        )
-
-        payload = {
-            **envelope.payload,
-            "x402_ref": f"x402:{job_id}",
-            "x402_transaction": result.x402_tx,
-            "x402_network": result.network,
-            "x402_payer": result.payer,
-        }
-        envelope = envelope.model_copy(update={"payload": payload})
-        store.append_event(envelope)
-
-        events = store.get_events(job_id)
-        new_state = derive_ap2_job_state(events)
-        return {
-            "job_id": job_id,
-            "mandate_track_state": new_state.mandate_track_state.value
-            if new_state.mandate_track_state
-            else None,
-            "x402_ref": payload["x402_ref"],
-            "x402_transaction": result.x402_tx,
-        }
-
-    @application.post("/jobs/{job_id}/settlement/x402/confirm")
-    async def confirm_x402(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = _store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        if envelope.type != AP2EventType.SETTLEMENT_402_CONFIRMED.value:
-            raise BadRequestError("Expected type SETTLEMENT_402_CONFIRMED")
-
-        _verify_sig(envelope)
-        envelope = envelope.model_copy(update={"job_id": job_id})
-
-        events = store.get_events(job_id)
-        state = derive_ap2_job_state(events)
-        validate_ap2_transition(state, envelope)
-
-        payload = {
-            **envelope.payload,
-            "x402_settlement_ref": f"x402_settled:{job_id}",
-        }
-        envelope = envelope.model_copy(update={"payload": payload})
-        store.append_event(envelope)
-
-        events = store.get_events(job_id)
-        new_state = derive_ap2_job_state(events)
-        return {
-            "job_id": job_id,
-            "mandate_track_state": new_state.mandate_track_state.value
-            if new_state.mandate_track_state
-            else None,
-            "x402_settlement_ref": payload["x402_settlement_ref"],
-        }
 
 
 # Default app instance for uvicorn

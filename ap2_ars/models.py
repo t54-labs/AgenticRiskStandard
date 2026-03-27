@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from ars.models import FeeTerms, JobStateView, PrincipalTerms
+from ars.models import EventType, FeeTerms, JobStateView, PrincipalTerms
 
 
 # ── AP2 Enums ────────────────────────────────────────────────────────────────
@@ -26,58 +26,25 @@ class MandateTrackState(str, Enum):
     CART_APPROVED = "CART_APPROVED"
     PAYMENT_CREATED = "PAYMENT_CREATED"
     PAYMENT_SIGNED = "PAYMENT_SIGNED"
-    SETTLEMENT_INITIATED = "SETTLEMENT_INITIATED"
-    SETTLEMENT_CONFIRMED = "SETTLEMENT_CONFIRMED"
 
 
-class AP2EventType(str, Enum):
-    # Base ARS event types (re-exported)
-    JOB_CREATED = "JOB_CREATED"
-    PROPOSAL_SUBMITTED = "PROPOSAL_SUBMITTED"
-    AGREEMENT_SIGNED = "AGREEMENT_SIGNED"
-    FEE_ESCROW_LOCKED = "FEE_ESCROW_LOCKED"
-    DELIVERABLE_SUBMITTED = "DELIVERABLE_SUBMITTED"
-    OUTCOME_EVALUATED = "OUTCOME_EVALUATED"
-    FEE_SETTLED = "FEE_SETTLED"
-    UW_REQUESTED = "UW_REQUESTED"
-    UW_DECIDED = "UW_DECIDED"
-    PREMIUM_PAID = "PREMIUM_PAID"
-    COLLATERAL_LOCKED = "COLLATERAL_LOCKED"
-    COLLATERAL_REFUSED = "COLLATERAL_REFUSED"
-    OVERRIDE_DECIDED = "OVERRIDE_DECIDED"
-    RELEASE_APPROVED = "RELEASE_APPROVED"
-    PRINCIPAL_RELEASED = "PRINCIPAL_RELEASED"
-    EXECUTION_EVIDENCE_SUBMITTED = "EXECUTION_EVIDENCE_SUBMITTED"
-    # AP2-specific mandate events
-    INTENT_MANDATE_CREATED = "INTENT_MANDATE_CREATED"
-    CART_MANDATE_PROPOSED = "CART_MANDATE_PROPOSED"
-    CART_MANDATE_SIGNED = "CART_MANDATE_SIGNED"
-    CART_APPROVED_BY_USER = "CART_APPROVED_BY_USER"
-    PAYMENT_MANDATE_CREATED = "PAYMENT_MANDATE_CREATED"
-    PAYMENT_MANDATE_SIGNED = "PAYMENT_MANDATE_SIGNED"
-    SETTLEMENT_402_INITIATED = "SETTLEMENT_402_INITIATED"
-    SETTLEMENT_402_CONFIRMED = "SETTLEMENT_402_CONFIRMED"
-
-
-# Set of base ARS event type values (for filtering)
-_BASE_EVENT_TYPES = {
-    "JOB_CREATED",
-    "PROPOSAL_SUBMITTED",
-    "AGREEMENT_SIGNED",
-    "FEE_ESCROW_LOCKED",
-    "DELIVERABLE_SUBMITTED",
-    "OUTCOME_EVALUATED",
-    "FEE_SETTLED",
-    "UW_REQUESTED",
-    "UW_DECIDED",
-    "PREMIUM_PAID",
-    "COLLATERAL_LOCKED",
-    "COLLATERAL_REFUSED",
-    "OVERRIDE_DECIDED",
-    "RELEASE_APPROVED",
-    "PRINCIPAL_RELEASED",
-    "EXECUTION_EVIDENCE_SUBMITTED",
+# AP2-specific mandate events (the 8 additions beyond base ARS)
+_AP2_EXTRA_EVENTS = {
+    "INTENT_MANDATE_CREATED": "INTENT_MANDATE_CREATED",
+    "CART_MANDATE_PROPOSED": "CART_MANDATE_PROPOSED",
+    "CART_MANDATE_SIGNED": "CART_MANDATE_SIGNED",
+    "CART_APPROVED_BY_USER": "CART_APPROVED_BY_USER",
+    "PAYMENT_MANDATE_CREATED": "PAYMENT_MANDATE_CREATED",
+    "PAYMENT_MANDATE_SIGNED": "PAYMENT_MANDATE_SIGNED",
 }
+
+# Build AP2EventType dynamically: all base EventType members + AP2-specific ones
+AP2EventType = Enum(
+    "AP2EventType", {m.name: m.value for m in EventType} | _AP2_EXTRA_EVENTS, type=str,
+)
+
+# Derive base event types from EventType automatically
+_BASE_EVENT_TYPES: frozenset[str] = frozenset(m.value for m in EventType)
 
 
 def is_base_event_type(event_type: str) -> bool:
@@ -102,6 +69,7 @@ class IntentMandate(BaseModel):
     allowed_merchants: list[str]  # merchant pubkey hex whitelist
     sku_patterns: list[str] = []  # glob patterns for allowed SKUs
     description: str  # natural language intent
+    requires_principal: bool = False  # whether UW/principal track is needed
     signature: str  # Ed25519 over canonical claims
 
 
@@ -165,6 +133,4 @@ class AP2JobStateView(JobStateView):
     intent_mandate: Optional[dict] = None
     cart_mandate: Optional[dict] = None
     payment_mandate: Optional[dict] = None
-    x402_ref: Optional[str] = None
-    x402_settlement_ref: Optional[str] = None
     constraint_violations: list[str] = []

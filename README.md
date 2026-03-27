@@ -25,9 +25,10 @@ ap2_ars/      Concrete AP2 realization (inherits from ars/)
 `ap2_ars/` extends `ars/` through proper inheritance:
 - Uses `ars.models.SignedActionEnvelope` and `ars.models.Event` directly (no reimplementation)
 - `AP2JobStateView` inherits from `ars.models.JobStateView`, adding mandate track fields
+- `AP2EventType` is dynamically composed from base `EventType` + AP2-specific events (no duplication)
 - Uses `ars.store.EventStore` directly for event persistence
 - Calls `ars.state.derive_job_state()` and `ars.state.validate_transition()` for base fee/principal tracks
-- Adds a parallel mandate state machine for AP2-specific event types
+- Mandate track provides structured user intent verification (authorization layer) that feeds into the base fee/principal tracks for actual settlement
 
 ## Overview
 
@@ -137,38 +138,44 @@ ars/
 
 `ap2_ars/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `ars/` primitives and adds three layers:
 
-### 1. AP2 Mandates (Verifiable Digital Credentials)
+### 1. AP2 Mandates (Authorization Layer)
 
-Three signed credential types that provide cryptographic proof of user intent:
+Three signed credential types that provide cryptographic proof of user intent. The mandate flow is the **authorization layer** — it verifies what to buy and from whom. After mandate completion (`PAYMENT_SIGNED`), actual money movement flows through the base ARS fee/principal tracks for settlement safety.
 
 | Mandate | Signer | Purpose |
 |---------|--------|---------|
-| **IntentMandate** | User | Pre-authorizes autonomous purchases: budget, merchant whitelist, SKU constraints, TTL |
+| **IntentMandate** | User | Pre-authorizes purchases: budget, merchant whitelist, SKU constraints, TTL, `requires_principal` flag |
 | **CartMandate** | Merchant | Price/items guarantee with short TTL (5-15 min), prevents bait-and-switch |
 | **PaymentMandate** | User / Credentials Provider | Final payment authorization referencing the CartMandate hash |
 
+The `requires_principal` field on `IntentMandate` determines which settlement track is used after mandate completion:
+- `requires_principal=False`: Fee track only (escrow purchase amount → deliver → evaluate → release/refund)
+- `requires_principal=True`: Fee track + principal track (adds UW review, premium, collateral)
+
 ### 2. Six-Actor Model with Firewall
 
-AP2 extends the base ARS roles to six mandatory actors:
+AP2 extends the base ARS roles to six mandatory actors. The key insight: the **shopping agent is the user's proxy** (it never receives payment), while the **merchant is the counterparty** who signs agreements, delivers goods, and receives payment:
 
 | AP2 Role | Base ARS Equivalent | Purpose |
 |----------|-------------------|---------|
-| **User** | Requestor | Signs mandates, ultimate payment authority |
-| **Shopping Agent** | Business Agent | Negotiates with merchants, **never sees payment data** |
+| **User** | Requestor | Signs mandates, locks fee escrow, ultimate payment authority |
+| **Shopping Agent** | *(user's proxy)* | Negotiates with merchants on behalf of user, **never sees payment data or receives payment** |
 | **Evaluator** | Evaluator | Independent quality verdict |
 | **Credentials Provider** | *(new)* | Secure wallet holding PCI/PII data, executes PaymentMandate |
-| **Merchant** | *(new)* | Builds cart, signs CartMandate |
-| **Payment Processor** | Settlement Layer | Routes transactions, triggers 3DS, settles via x402 |
+| **Merchant** | Business Agent | Builds cart, signs CartMandate, signs agreements, delivers goods, receives payment |
+| **Payment Processor** | Settlement Layer | Routes transactions, triggers 3DS |
 
 The **agent-payment firewall** is enforced cryptographically at job creation: the Shopping Agent's key must differ from the Credentials Provider's and Payment Processor's keys. The agent orchestrates the flow but cannot access payment credentials.
 
 ### 3. Settlement Stack: x402 + ARSEscrow
 
+x402 and ARSEscrow work together as the **internal transport** for the fee and principal tracks. There is no separate mandate settlement path — mandates authorize, tracks settle.
+
 ```
-x402 (payment rail)     ──>  ARSEscrow.sol (hold/release/refund/slash)
-  │                               │
-  EIP-3009 gasless USDC          On-chain escrow contract
-  via Coinbase facilitator        per-job deposit tracking
+Fee/Principal Tracks ──> x402 (payment rail) ──> ARSEscrow.sol (hold/release/refund/slash)
+                           │                          │
+                           EIP-3009 gasless USDC      On-chain escrow contract
+                           via Coinbase facilitator    per-job deposit tracking
 ```
 
 **x402** handles moving USDC between wallets — it's a one-shot payment protocol using EIP-3009 `transferWithAuthorization`. The user signs an authorization offline, and the Coinbase facilitator submits it on-chain.
@@ -178,43 +185,47 @@ x402 (payment rail)     ──>  ARSEscrow.sol (hold/release/refund/slash)
 | Contract Function | What it does |
 |---|---|
 | `recordDeposit(jobId, type, payer, payee, amount)` | Tags a deposit after x402 transfer |
-| `release(jobId, type)` | Sends USDC to payee (business agent/merchant) |
+| `release(jobId, type)` | Sends USDC to payee (merchant) |
 | `refund(jobId, type)` | Returns USDC to payer (user) |
 | `slash(jobId, treasury)` | Seizes collateral to protocol treasury |
 
 ### Dual Modality
 
-**Human-Present** (10-step flow): User sees the cart and explicitly approves before payment.
+Both modalities follow the same pattern: mandate authorizes, then fee/principal tracks settle.
+
+**Human-Present**: User sees the cart and explicitly approves before payment.
 
 ```
 User → Agent → Merchant negotiation → CartMandate signed
-  → User approves cart → PaymentMandate → Credentials Provider
-  → Payment Processor → x402 settlement → Confirmation
+  → User approves cart → PaymentMandate → User signs payment
+  → Fee lock (escrow cart total, payee = merchant)
+  → Merchant delivers → Evaluator verdicts → Fee release/refund
 ```
 
 **Human-NOT-Present** (autonomous): User pre-signs an IntentMandate with constraints. The agent shops within those boundaries without human intervention.
 
 ```
-User pre-signs IntentMandate (budget, merchants, SKUs, TTL)
+User pre-signs IntentMandate (budget, merchants, SKUs, TTL, requires_principal)
   → Agent shops → Merchant signs CartMandate
   → Constraint engine auto-validates (budget, whitelist, SKU patterns)
-  → Credentials Provider auto-executes → x402 settlement
+  → Credentials Provider creates + signs PaymentMandate
+  → Fee lock (escrow cart total, payee = merchant)
+  → [If requires_principal: UW review → premium/collateral]
+  → Merchant delivers → Evaluator verdicts → Fee release/refund
 ```
 
 ### AP2-Specific Endpoints
 
-In addition to all base ARS endpoints, `ap2_ars/` adds:
+In addition to all base ARS endpoints, `ap2_ars/` adds mandate endpoints. After mandate completion, the base ARS fee/principal endpoints handle settlement:
 
 | Method | Path | Event Type | Actor |
 |--------|------|-----------|-------|
 | `POST` | `/jobs/{id}/mandates/intent` | `INTENT_MANDATE_CREATED` | User |
 | `POST` | `/jobs/{id}/mandates/cart` | `CART_MANDATE_PROPOSED` | Merchant |
 | `POST` | `/jobs/{id}/mandates/cart/sign` | `CART_MANDATE_SIGNED` | Merchant |
-| `POST` | `/jobs/{id}/mandates/cart/approve` | `CART_APPROVED_BY_USER` | User |
+| `POST` | `/jobs/{id}/mandates/cart/approve` | `CART_APPROVED_BY_USER` | User (human-present only) |
 | `POST` | `/jobs/{id}/mandates/payment` | `PAYMENT_MANDATE_CREATED` | Credentials Provider |
-| `POST` | `/jobs/{id}/mandates/payment/sign` | `PAYMENT_MANDATE_SIGNED` | User |
-| `POST` | `/jobs/{id}/settlement/x402/initiate` | `SETTLEMENT_402_INITIATED` | Payment Processor |
-| `POST` | `/jobs/{id}/settlement/x402/confirm` | `SETTLEMENT_402_CONFIRMED` | Payment Processor |
+| `POST` | `/jobs/{id}/mandates/payment/sign` | `PAYMENT_MANDATE_SIGNED` | User / Credentials Provider |
 | `GET` | `/jobs/{id}/mandates` | — | Any |
 | `GET` | `/jobs/{id}/constraints/check` | — | Any |
 
@@ -261,15 +272,15 @@ app = create_app(settlement=settlement)
 
 ```
 ap2_ars/
-  models.py        # AP2AgreementDraft, VDC types, AP2JobStateView (inherits JobStateView)
+  models.py        # AP2AgreementDraft, VDC types, AP2EventType (derived from base), AP2JobStateView
   vdc.py           # VDC creation, Ed25519 signing/verification, TTL enforcement
   roles.py         # 6-actor RoleRegistry + cryptographic firewall
   constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
-  x402.py          # x402 payment rail — LiveX402Settlement + MockX402Settlement
+  x402.py          # x402 payment rail (internal transport) — LiveX402Settlement + Mock
   escrow.py        # Python interface to ARSEscrow contract — LiveEscrowClient + Mock
-  settlement.py    # Unified SettlementLayer composing x402 + escrow
-  state.py         # Composite state machine (base ARS + mandate track)
-  server.py        # FastAPI app — base ARS endpoints + AP2 mandate/settlement endpoints
+  settlement.py    # Unified SettlementLayer composing x402 + escrow for fee/principal tracks
+  state.py         # Composite state machine: mandate authorization + base fee/principal tracks
+  server.py        # FastAPI app — base ARS endpoints + AP2 mandate endpoints
   contracts/
     ARSEscrow.sol       # Solidity escrow contract (USDC hold/release/refund/slash)
     ars_escrow_abi.json  # Pre-compiled contract ABI
@@ -417,12 +428,14 @@ All subsequent endpoints accept a `SignedActionEnvelope`:
 
 | Method | Path | Event Type | Actor | Required Payload |
 |--------|------|-----------|-------|------------------|
-| `POST` | `/jobs/{id}/proposals` | `PROPOSAL_SUBMITTED` | Requestor or Agent | `{"agreement": {...}}` |
-| `POST` | `/jobs/{id}/signatures` | `AGREEMENT_SIGNED` | Requestor or Agent | `{}` |
+| `POST` | `/jobs/{id}/proposals` | `PROPOSAL_SUBMITTED` | Requestor or Business Agent | `{"agreement": {...}}` |
+| `POST` | `/jobs/{id}/signatures` | `AGREEMENT_SIGNED` | Requestor or Business Agent | `{}` |
 | `POST` | `/jobs/{id}/fee/lock` | `FEE_ESCROW_LOCKED` | Requestor | `{}` |
-| `POST` | `/jobs/{id}/deliverable` | `DELIVERABLE_SUBMITTED` | Agent | `{"deliverable_ref": "..."}` |
+| `POST` | `/jobs/{id}/deliverable` | `DELIVERABLE_SUBMITTED` | Business Agent | `{"deliverable_ref": "..."}` |
 | `POST` | `/jobs/{id}/evaluate` | `OUTCOME_EVALUATED` | Evaluator | `{"verdict": "pass" or "fail"}` |
 | `POST` | `/jobs/{id}/fee/settle` | `FEE_SETTLED` | Any | `{"action": "release" or "refund"}` |
+
+In `ap2_ars/`, the fee lock uses the **cart total** from the completed mandate as the escrow amount, with the **merchant** as payee. The fee lock and UW request are gated on mandate completion (`PAYMENT_SIGNED`).
 
 Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`.
 
@@ -430,7 +443,7 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 
 | Method | Path | Event Type | Actor | Required Payload |
 |--------|------|-----------|-------|------------------|
-| `POST` | `/jobs/{id}/uw/request` | `UW_REQUESTED` | Agent | `{}` |
+| `POST` | `/jobs/{id}/uw/request` | `UW_REQUESTED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/decide` | `UW_DECIDED` | Underwriter | `{"approve": true/false, "premium": 0, "collateral_required": 0}` |
 | `POST` | `/jobs/{id}/uw/premium` | `PREMIUM_PAID` | Requestor | `{"premium_ref": "..."}` |
 | `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Requestor | `{}` |
@@ -438,7 +451,7 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |
 | `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/principal/release` | `PRINCIPAL_RELEASED` | Settlement Layer | `{}` |
-| `POST` | `/jobs/{id}/execution-evidence` | `EXECUTION_EVIDENCE_SUBMITTED` | Agent | `{"exec_evidence_ref": "..."}` |
+| `POST` | `/jobs/{id}/execution-evidence` | `EXECUTION_EVIDENCE_SUBMITTED` | Business Agent | `{"exec_evidence_ref": "..."}` |
 
 ### Query Endpoints
 

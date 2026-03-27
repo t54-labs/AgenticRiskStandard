@@ -21,10 +21,6 @@ from .models import (
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _claims_dict(mandate) -> dict:
     """Extract the signable claims (everything except 'signature')."""
     d = mandate.model_dump()
@@ -60,6 +56,7 @@ def create_intent_mandate(
     currency: str = "USD",
     sku_patterns: list[str] | None = None,
     ttl_seconds: int = 3600,
+    requires_principal: bool = False,
 ) -> IntentMandate:
     """Create and sign an IntentMandate VDC."""
     now = datetime.now(timezone.utc)
@@ -92,6 +89,7 @@ def create_intent_mandate(
         allowed_merchants=allowed_merchants,
         sku_patterns=sku_patterns or [],
         description=description,
+        requires_principal=requires_principal,
         signature="",  # placeholder, will be replaced
     )
     claims = _claims_dict(mandate)

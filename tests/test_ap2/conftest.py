@@ -176,6 +176,7 @@ def make_intent_mandate_payload(
     budget: int = 5000,
     allowed_merchants: list[str] | None = None,
     ttl_seconds: int = 3600,
+    requires_principal: bool = False,
 ) -> dict:
     now = datetime.now(timezone.utc)
     exp = now + timedelta(seconds=ttl_seconds)
@@ -192,6 +193,7 @@ def make_intent_mandate_payload(
         "allowed_merchants": allowed_merchants or [],
         "sku_patterns": ["*"],
         "description": "Test intent",
+        "requires_principal": requires_principal,
         "signature": "placeholder",
     }
 

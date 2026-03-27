@@ -41,11 +41,3 @@ async def test_collateral_lock_and_unlock():
     await sl.lock_collateral("job-1", 5000, "USD", "payer")
     unlock = await sl.unlock_collateral("job-1")
     assert "collateral_unlocked" in unlock.ref
-
-
-@pytest.mark.asyncio
-async def test_mandate_settlement():
-    sl = MockSettlementLayer()
-    result = await sl.settle_mandate("job-1", 2000, "USD", {}, {})
-    assert result.x402_tx is not None
-    assert result.network == "eip155:84532"

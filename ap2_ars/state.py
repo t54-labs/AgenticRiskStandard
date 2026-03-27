@@ -31,14 +31,14 @@ from .roles import AP2Role, RoleRegistry
 
 _AP2_TO_BASE_KEYS = {
     "user_pubkey": "requestor_pubkey",
-    "shopping_agent_pubkey": "business_agent_pubkey",
+    "merchant_pubkey": "business_agent_pubkey",
     "payment_processor_pubkey": "settlement_layer_pubkey",
 }
 
 _AP2_ONLY_KEYS = {
     "modality",
     "credentials_provider_pubkey",
-    "merchant_pubkey",
+    "shopping_agent_pubkey",
 }
 
 
@@ -84,16 +84,10 @@ class _MandateAcc:
     cart_approved: bool = False
     payment_mandate: Optional[dict] = None
     payment_mandate_signed: bool = False
-    x402_ref: Optional[str] = None
-    x402_settlement_ref: Optional[str] = None
     constraint_violations: list[str] = field(default_factory=list)
 
 
 def _derive_mandate_track(acc: _MandateAcc) -> Optional[MandateTrackState]:
-    if acc.x402_settlement_ref:
-        return MandateTrackState.SETTLEMENT_CONFIRMED
-    if acc.x402_ref:
-        return MandateTrackState.SETTLEMENT_INITIATED
     if acc.payment_mandate_signed:
         return MandateTrackState.PAYMENT_SIGNED
     if acc.payment_mandate:
@@ -125,10 +119,6 @@ def _replay_mandate_events(events: list[Event]) -> _MandateAcc:
             acc.payment_mandate = ev.payload
         elif et == AP2EventType.PAYMENT_MANDATE_SIGNED.value:
             acc.payment_mandate_signed = True
-        elif et == AP2EventType.SETTLEMENT_402_INITIATED.value:
-            acc.x402_ref = ev.payload.get("x402_ref")
-        elif et == AP2EventType.SETTLEMENT_402_CONFIRMED.value:
-            acc.x402_settlement_ref = ev.payload.get("x402_settlement_ref")
     return acc
 
 
@@ -184,8 +174,6 @@ def derive_ap2_job_state(events: list[Event]) -> AP2JobStateView:
             intent_mandate=mandate_acc.intent_mandate,
             cart_mandate=mandate_acc.cart_mandate,
             payment_mandate=mandate_acc.payment_mandate,
-            x402_ref=mandate_acc.x402_ref,
-            x402_settlement_ref=mandate_acc.x402_settlement_ref,
             constraint_violations=mandate_acc.constraint_violations,
         )
 
@@ -199,8 +187,6 @@ def derive_ap2_job_state(events: list[Event]) -> AP2JobStateView:
         intent_mandate=mandate_acc.intent_mandate,
         cart_mandate=mandate_acc.cart_mandate,
         payment_mandate=mandate_acc.payment_mandate,
-        x402_ref=mandate_acc.x402_ref,
-        x402_settlement_ref=mandate_acc.x402_settlement_ref,
         constraint_violations=mandate_acc.constraint_violations,
     )
 
@@ -225,6 +211,35 @@ def validate_ap2_transition(
 
     # Base ARS events — delegate to base validator
     if is_base_event_type(et):
+        _mandate_active = (
+            state.mandate_track_state is not None
+            and state.mandate_track_state != MandateTrackState.MANDATE_NONE
+        )
+        _mandate_complete = (
+            state.mandate_track_state == MandateTrackState.PAYMENT_SIGNED
+        )
+        _requires_principal = bool(
+            state.intent_mandate and state.intent_mandate.get("requires_principal")
+        )
+
+        # Gate fee lock on mandate completion (when mandate exists)
+        if et == AP2EventType.FEE_ESCROW_LOCKED.value:
+            if _mandate_active and not _mandate_complete:
+                raise ConflictError(
+                    "Fee lock requires mandate to be completed (PAYMENT_SIGNED)"
+                )
+
+        # Gate UW request on mandate's requires_principal flag
+        if et == AP2EventType.UW_REQUESTED.value:
+            if _mandate_active and not _mandate_complete:
+                raise ConflictError(
+                    "UW request requires mandate to be completed (PAYMENT_SIGNED)"
+                )
+            if _mandate_active and not _requires_principal:
+                raise ConflictError(
+                    "UW request blocked: intent mandate has requires_principal=False"
+                )
+
         _validate_base_transition(state, envelope)
         return
 
@@ -282,16 +297,6 @@ def validate_ap2_transition(
             registry.assert_role(envelope.actor, AP2Role.USER)
         else:
             registry.assert_role(envelope.actor, AP2Role.CREDENTIALS_PROVIDER)
-
-    elif et == AP2EventType.SETTLEMENT_402_INITIATED.value:
-        if state.mandate_track_state != MandateTrackState.PAYMENT_SIGNED:
-            raise ConflictError("Settlement requires PAYMENT_SIGNED state")
-        registry.assert_role(envelope.actor, AP2Role.PAYMENT_PROCESSOR)
-
-    elif et == AP2EventType.SETTLEMENT_402_CONFIRMED.value:
-        if state.mandate_track_state != MandateTrackState.SETTLEMENT_INITIATED:
-            raise ConflictError("Confirmation requires SETTLEMENT_INITIATED state")
-        registry.assert_role(envelope.actor, AP2Role.PAYMENT_PROCESSOR)
 
     else:
         raise BadRequestError(f"Unknown event type: {et}")
