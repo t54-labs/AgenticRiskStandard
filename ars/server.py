@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import FastAPI, Request
 
@@ -15,21 +15,21 @@ from .models import (
     SignedActionEnvelope,
 )
 from .routes import create_shared_router, verify_sig
+from .settlement import MockSettlementLayer, SettlementLayer
 from .state import derive_job_state, validate_transition
 from .store import EventStore
-from .vault import MockCollateralVault, MockEscrowVault, MockPrincipalVault
 
 
 # ── App factory ──────────────────────────────────────────────────────────────
 
 
-def create_app(db_path: str = "ars.db") -> FastAPI:
+def create_app(
+    db_path: str = "ars.db", settlement: Optional[SettlementLayer] = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         application.state.store = EventStore(db_path=db_path)
-        application.state.vault = MockEscrowVault()
-        application.state.collateral_vault = MockCollateralVault()
-        application.state.principal_vault = MockPrincipalVault()
+        application.state.settlement = settlement or MockSettlementLayer()
         yield
 
     application = FastAPI(title="ARS v1", version="0.1.0", lifespan=lifespan)
@@ -54,16 +54,8 @@ def _store(request: Request) -> EventStore:
     return request.app.state.store
 
 
-def _vault(request: Request) -> MockEscrowVault:
-    return request.app.state.vault
-
-
-def _collateral_vault(request: Request) -> MockCollateralVault:
-    return request.app.state.collateral_vault
-
-
-def _principal_vault(request: Request) -> MockPrincipalVault:
-    return request.app.state.principal_vault
+def _settlement(request: Request) -> SettlementLayer:
+    return request.app.state.settlement
 
 
 # ── Override routes (server-specific) ────────────────────────────────────────
@@ -128,19 +120,26 @@ def _register_override_routes(application: FastAPI) -> None:
         state = derive_job_state(events)
         validate_transition(state, envelope)
 
-        vault = _vault(request)
         assert state.agreement is not None
         agr = AgreementDraft(**state.agreement)
-        lock_ref = vault.lock(job_id, agr.fee.amount, agr.fee.currency)
 
-        payload = {**envelope.payload, "lock_ref": lock_ref}
+        sl = _settlement(request)
+        lock_result = await sl.lock_fee(
+            job_id,
+            agr.fee.amount,
+            agr.fee.currency,
+            payer_addr=agr.requestor_pubkey,
+            payee_addr=agr.business_agent_pubkey,
+        )
+
+        payload = {**envelope.payload, "lock_ref": lock_result.ref}
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
 
         return {
             "job_id": job_id,
             "fee_track_state": "FEE_ESCROW_LOCKED",
-            "lock_ref": lock_ref,
+            "lock_ref": lock_result.ref,
         }
 
     @application.post("/jobs/{job_id}/fee/settle")
@@ -162,11 +161,14 @@ def _register_override_routes(application: FastAPI) -> None:
         state = derive_job_state(events)
         validate_transition(state, envelope)
 
-        vault = _vault(request)
-        assert state.fee_lock_ref is not None
-        settlement_ref = vault.settle(state.fee_lock_ref, envelope.payload["action"])
+        sl = _settlement(request)
+        action = envelope.payload["action"]
+        if action == "release":
+            result = await sl.release_fee(job_id)
+        else:
+            result = await sl.refund_fee(job_id)
 
-        payload = {**envelope.payload, "settlement_ref": settlement_ref}
+        payload = {**envelope.payload, "settlement_ref": result.ref}
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
 
@@ -178,7 +180,7 @@ def _register_override_routes(application: FastAPI) -> None:
             "fee_track_state": new_state.fee_track_state.value
             if new_state.fee_track_state
             else None,
-            "settlement_ref": settlement_ref,
+            "settlement_ref": result.ref,
         }
 
     @application.post("/jobs/{job_id}/uw/collateral/lock")
@@ -206,13 +208,16 @@ def _register_override_routes(application: FastAPI) -> None:
         assert state.agreement
         agr = AgreementDraft(**state.agreement)
         assert agr.principal
-        cv = _collateral_vault(request)
-        collateral_ref = cv.lock(job_id, amt, agr.principal.currency)
 
-        payload = {**envelope.payload, "amount": amt, "collateral_ref": collateral_ref}
+        sl = _settlement(request)
+        lock_result = await sl.lock_collateral(
+            job_id, amt, agr.principal.currency, payer_addr=agr.business_agent_pubkey,
+        )
+
+        payload = {**envelope.payload, "amount": amt, "collateral_ref": lock_result.ref}
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
-        return {"job_id": job_id, "collateral_ref": collateral_ref}
+        return {"job_id": job_id, "collateral_ref": lock_result.ref}
 
     @application.post("/jobs/{job_id}/principal/release")
     async def release_principal(
@@ -234,8 +239,9 @@ def _register_override_routes(application: FastAPI) -> None:
         assert state.agreement
         agr = AgreementDraft(**state.agreement)
         assert agr.principal
-        pv = _principal_vault(request)
-        transfer_ref = pv.release(
+
+        sl = _settlement(request)
+        result = await sl.release_principal(
             job_id,
             agr.principal.amount,
             agr.principal.currency,
@@ -244,12 +250,12 @@ def _register_override_routes(application: FastAPI) -> None:
 
         payload = {
             **envelope.payload,
-            "transfer_ref": transfer_ref,
+            "transfer_ref": result.ref,
             "approvals": state.release_approvals,
         }
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
-        return {"job_id": job_id, "transfer_ref": transfer_ref}
+        return {"job_id": job_id, "transfer_ref": result.ref}
 
 
 # Default app instance for `uvicorn ars.server:app`
