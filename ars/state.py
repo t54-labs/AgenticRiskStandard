@@ -40,6 +40,7 @@ class _Acc:
     premium_ref: Optional[str] = None
     collateral_ref: Optional[str] = None
     collateral_required: Optional[int] = None
+    premium_refused: bool = False
     collateral_refused: bool = False
     premium_amount: Optional[int] = None
     override: Optional[dict] = None
@@ -137,7 +138,13 @@ def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
     # approved underwriting
     premium = acc.uw_decision.get("premium", 0) or 0
     if premium > 0 and acc.premium_ref is None:
-        return PrincipalTrackState.PREMIUM_PENDING
+        if acc.premium_refused:
+            # premium refused → need override to proceed
+            if not _override_ack(acc):
+                return PrincipalTrackState.OVERRIDE_PENDING
+            # override accepted, proceed past premium gate
+        else:
+            return PrincipalTrackState.PREMIUM_PENDING
 
     collateral_req = acc.uw_decision.get("collateral_required", 0) or 0
     if collateral_req > 0 and acc.collateral_ref is None:
@@ -205,6 +212,9 @@ def derive_job_state(events: list[Event]) -> JobStateView:
 
         elif ev.event_type == EventType.PREMIUM_PAID:
             acc.premium_ref = ev.payload.get("premium_ref")
+
+        elif ev.event_type == EventType.PREMIUM_REFUSED:
+            acc.premium_refused = True
 
         elif ev.event_type == EventType.COLLATERAL_LOCKED:
             acc.collateral_ref = ev.payload.get("collateral_ref")
@@ -346,6 +356,12 @@ def validate_transition(state: JobStateView, envelope: SignedActionEnvelope) -> 
             raise ConflictError("Premium payment requires PREMIUM_PENDING state")
         if agr and envelope.actor != agr.requestor_pubkey:
             raise ForbiddenError("Only requestor can pay premium")
+
+    elif et == EventType.PREMIUM_REFUSED:
+        if state.principal_track_state != PrincipalTrackState.PREMIUM_PENDING:
+            raise ConflictError("Premium refusal requires PREMIUM_PENDING state")
+        if agr and envelope.actor != agr.requestor_pubkey:
+            raise ForbiddenError("Only requestor can refuse premium")
 
     elif et == EventType.COLLATERAL_LOCKED:
         if state.principal_track_state != PrincipalTrackState.COLLATERAL_REQUESTED:

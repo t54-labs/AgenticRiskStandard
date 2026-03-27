@@ -629,6 +629,51 @@ def test_uw_collateral_refused_override(
     assert "transfer_ref" in xfer
 
 
+def test_uw_premium_refused_override(
+    client,
+    requestor_keys,
+    agent_keys,
+    evaluator_keys,
+    underwriter_keys,
+    settlement_keys,
+):
+    """UW approves with premium → requestor refuses → override → release."""
+    req_sk, req_pk = requestor_keys
+    agent_sk, agent_pk = agent_keys
+    _, eval_pk = evaluator_keys
+    uw_sk, uw_pk = underwriter_keys
+    settle_sk, settle_pk = settlement_keys
+
+    job_id, agr_hash, _ = _create_fund_moving_job(
+        client, req_sk, req_pk, agent_pk, eval_pk, uw_pk, settle_pk
+    )
+    _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
+    _lock_fee(client, job_id, agr_hash, req_sk)
+    _uw_request(client, job_id, agr_hash, agent_sk)
+    _uw_decide(client, job_id, agr_hash, uw_sk, approve=True, premium=100)
+
+    # State should be PREMIUM_PENDING
+    state = client.get(f"/jobs/{job_id}").json()
+    assert state["principal_track_state"] == "PREMIUM_PENDING"
+
+    # Refuse premium
+    env = make_envelope(EventType.PREMIUM_REFUSED, job_id, agr_hash, {}, req_sk)
+    resp = client.post(f"/jobs/{job_id}/uw/premium/refuse", json=env)
+    assert resp.status_code == 200
+    assert resp.json()["principal_track_state"] == "OVERRIDE_PENDING"
+
+    # Requestor overrides
+    env = make_envelope(
+        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, req_sk,
+    )
+    resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
+    assert resp.status_code == 200
+
+    _approve_release(client, job_id, agr_hash, req_sk)
+    xfer = _release_principal(client, job_id, agr_hash, settle_sk)
+    assert "transfer_ref" in xfer
+
+
 # ── UW guardrail tests ──────────────────────────────────────────────────────
 
 

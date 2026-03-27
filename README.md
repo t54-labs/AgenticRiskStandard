@@ -446,6 +446,7 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/request` | `UW_REQUESTED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/decide` | `UW_DECIDED` | Underwriter | `{"approve": true/false, "premium": 0, "collateral_required": 0}` |
 | `POST` | `/jobs/{id}/uw/premium` | `PREMIUM_PAID` | Requestor | `{"premium_ref": "..."}` |
+| `POST` | `/jobs/{id}/uw/premium/refuse` | `PREMIUM_REFUSED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |

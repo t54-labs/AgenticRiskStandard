@@ -416,6 +416,23 @@ def _register_base_routes(application: FastAPI) -> None:
             "premium_ref": premium_ref,
         }
 
+    @application.post("/jobs/{job_id}/uw/premium/refuse")
+    async def refuse_premium(
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
+    ):
+        store = _store(request)
+        if not store.job_exists(job_id):
+            raise NotFoundError(f"Job {job_id} not found")
+        new_state = _append_validated(
+            store, job_id, envelope, AP2EventType.PREMIUM_REFUSED.value,
+        )
+        return {
+            "job_id": job_id,
+            "principal_track_state": new_state.principal_track_state.value
+            if new_state.principal_track_state
+            else None,
+        }
+
     @application.post("/jobs/{job_id}/uw/collateral/lock")
     async def lock_collateral(
         job_id: str, envelope: SignedActionEnvelope, request: Request,
