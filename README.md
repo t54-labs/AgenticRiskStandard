@@ -4,7 +4,9 @@ A settlement-layer protocol for trustworthy AI agent services. ARS provides cryp
 
 **ARS is designed as an abstract protocol with pluggable concrete implementations.** The `ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
 
-This repo ships with one concrete implementation: **`ap2/server/`**, which realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract.
+This repo ships with two concrete implementations:
+- **`ap2/server/`** — realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract
+- **`vi/server/`** — realizes ARS using Mastercard's Verifiable Intent (VI) specification with ES256/SD-JWT credential chains and selective disclosure
 
 ## Abstract vs. Concrete
 
@@ -15,6 +17,9 @@ src/
   ap2/
     server/         Concrete AP2 server (mandates, roles, x402, escrow)
     client/         Concrete AP2 client SDK (UserClient, MerchantClient, ...)
+  vi/
+    server/         Concrete VI server (SD-JWT credentials, roles, selective disclosure)
+    client/         Concrete VI client SDK (VIUserClient, VIAgentClient, ...)
 ```
 
 `ap2/server/` extends `ars/` through proper inheritance:
@@ -284,6 +289,113 @@ src/ap2/
     merchant.py      # MerchantClient (extends BusinessAgentClient with cart methods)
     shopping_agent.py # ShoppingAgentClient (read-only orchestrator)
     cli.py           # AP2 CLI extending base CLI
+```
+
+---
+
+## vi/server/ — Concrete VI Implementation
+
+`vi/server/` is a concrete realization of ARS using Mastercard's Verifiable Intent (VI) specification. It inherits the abstract `ars/` primitives and adds three layers:
+
+### 1. SD-JWT Credential Chain (Authorization Layer)
+
+A three-layer credential chain using ES256-signed Selective Disclosure JWTs. The credential flow is the **authorization layer** — it establishes a cryptographically verifiable chain from issuer identity through user mandate to agent fulfillment. After credential verification, actual money movement flows through the base ARS fee/principal tracks.
+
+| Layer | Signer | Purpose |
+|-------|--------|---------|
+| **L1 Issuer Credential** | Credential Provider | Identity assertion: binds user's ES256 key, ~1 year TTL |
+| **L2 User Mandate** | User | Authorization: immediate (final values) or autonomous (constraints + agent delegation) |
+| **L3a Payment Fulfillment** | Agent | Agent's final payment values (autonomous only, 5 min TTL) |
+| **L3b Checkout Fulfillment** | Agent | Agent's final checkout values (autonomous only, 5 min TTL) |
+
+**Selective disclosure** is the key addition over AP2: the merchant receives only checkout data (L3b), and the payment network receives only payment data (L3a). Neither party sees the other's information.
+
+### 2. Seven-Actor Model with Firewall
+
+VI extends the base ARS roles to seven actors. The **agent is the user's proxy** (never receives payment), and the **merchant is the counterparty** (same mapping as AP2):
+
+| VI Role | Base ARS Equivalent | Purpose |
+|---------|-------------------|---------|
+| **User** | Requestor | Creates L2 mandates, locks fee escrow, holds Ed25519 + ES256 keys |
+| **Agent** | *(user's proxy)* | Creates L3 fulfillment credentials, **never sees payment data** |
+| **Evaluator** | Evaluator | Independent quality verdict |
+| **Credential Provider** | *(new)* | Issues L1 identity credentials, verifies chains |
+| **Merchant** | Business Agent | Delivers goods, receives payment, gets checkout-only presentation |
+| **Payment Network** | Settlement Layer | Verifies chains, settles, gets payment-only presentation |
+| **Underwriter** | Underwriter | Risk assessment for fund-moving jobs (optional) |
+
+### 3. Dual Modality
+
+**Immediate** (2-layer): User specifies exact purchase in L2. No L3 needed. Fee lock gate opens at `L2_VERIFIED`.
+
+```
+CredProvider: L1 → User: L2 (final values) → verify L2
+  → Fee lock → Merchant delivers → Evaluator verdicts → Settle
+```
+
+**Autonomous** (3-layer): User sets constraints in L2, agent fulfills in L3a/L3b.
+
+```
+CredProvider: L1 → User: L2 (constraints, delegate to agent)
+  → verify L2 → Agent: L3a + L3b → verify chain (+ constraint check)
+  → Fee lock → Merchant delivers → Evaluator verdicts → Settle
+```
+
+### VI-Specific Endpoints
+
+In addition to all base ARS endpoints, `vi/server/` adds credential endpoints:
+
+| Method | Path | Event Type | Actor |
+|--------|------|-----------|-------|
+| `POST` | `/jobs/{id}/credentials/l1` | `L1_CREDENTIAL_ISSUED` | Credential Provider |
+| `POST` | `/jobs/{id}/credentials/l2` | `L2_MANDATE_CREATED` | User |
+| `POST` | `/jobs/{id}/credentials/l2/verify` | `L2_MANDATE_VERIFIED` | Credential Provider / Payment Network |
+| `POST` | `/jobs/{id}/credentials/l3a` | `L3A_PAYMENT_CREATED` | Agent (autonomous only) |
+| `POST` | `/jobs/{id}/credentials/l3b` | `L3B_CHECKOUT_CREATED` | Agent (autonomous only) |
+| `POST` | `/jobs/{id}/credentials/l3/verify` | `L3_CHAIN_VERIFIED` | Credential Provider / Payment Network |
+| `POST` | `/jobs/{id}/credentials/settlement/initiate` | `SETTLEMENT_VI_INITIATED` | Payment Network |
+| `POST` | `/jobs/{id}/credentials/settlement/confirm` | `SETTLEMENT_VI_CONFIRMED` | Payment Network |
+| `GET` | `/jobs/{id}/credentials` | — | Any |
+| `GET` | `/jobs/{id}/credentials/present/merchant` | — | Any (checkout data only) |
+| `GET` | `/jobs/{id}/credentials/present/network` | — | Any (payment data only) |
+| `GET` | `/jobs/{id}/constraints/check` | — | Any |
+
+### Quickstart
+
+```bash
+# Install with VI extras (cryptography for ES256)
+pip install -e ".[dev,vi]"
+
+# Run the VI server (mock settlement for development)
+uvicorn vi.server.server:app --host 0.0.0.0 --port 8000
+
+# Run VI tests
+pytest tests/test_vi/ -v
+
+# Run ALL tests (base + AP2 + VI)
+pytest tests/ -v
+```
+
+### Architecture
+
+```
+src/vi/
+  server/
+    models.py        # VIAgreementDraft, credential track types, VIEventType, VIJobStateView
+    crypto.py        # ES256 key management, SD-JWT creation/verification, JWK conversion
+    credentials.py   # L1/L2/L3 creation, chain verification, sd_hash binding
+    roles.py         # 7-actor VIRoleRegistry + cryptographic firewall
+    constraints.py   # VI constraint engine (amount, merchant, payee, line items, budget)
+    state.py         # Composite state machine: credential authorization + base tracks
+    server.py        # FastAPI app: shared router + override + credential endpoints
+    settlement.py    # Re-exports SettlementLayer from ars.settlement
+  client/
+    user.py          # VIUserClient (extends RequestorClient with L2 methods)
+    agent.py         # VIAgentClient (L3 creation, credential queries)
+    merchant.py      # VIMerchantClient (extends BusinessAgentClient with presentation)
+    credential_provider.py  # VICredentialProviderClient (L1 issuance, chain verification)
+    payment_network.py      # VIPaymentNetworkClient (chain verification, settlement)
+    cli.py           # VI CLI extending base CLI
 ```
 
 ---

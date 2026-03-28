@@ -36,7 +36,9 @@ This design has several advantages. The event log is a complete audit trail. Sta
 
 ARS is designed as an abstract protocol with pluggable concrete implementations. The `ars/` package defines the protocol primitives: data models, state machine, cryptographic signing, event store, and escrow/settlement abstractions. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
 
-The first concrete implementation is AP2-ARS, which realizes ARS using Google's Agent Payments Protocol (AP2) with x402 on-chain USDC settlement and an escrow smart contract. See [AP2 Integration](../ap2-integration/overview.md) for details.
+Two concrete implementations are provided:
+- **AP2-ARS** realizes ARS using Google's Agent Payments Protocol (AP2) with Ed25519-signed VDC mandates and x402 on-chain USDC settlement. See [AP2 Integration](../ap2-integration/overview.md).
+- **VI-ARS** realizes ARS using Mastercard's Verifiable Intent (VI) specification with ES256-signed SD-JWT credential chains and selective disclosure. See [VI Integration](../vi-integration/overview.md).
 
 ## Further Reading
 
