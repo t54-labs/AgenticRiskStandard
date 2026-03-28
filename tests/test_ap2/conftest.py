@@ -177,10 +177,12 @@ def make_intent_mandate_payload(
     allowed_merchants: list[str] | None = None,
     ttl_seconds: int = 3600,
     requires_principal: bool = False,
+    max_premium: int | None = None,
+    allow_uw_override: bool = False,
 ) -> dict:
     now = datetime.now(timezone.utc)
     exp = now + timedelta(seconds=ttl_seconds)
-    return {
+    result = {
         "header": {
             "iss": user_pk,
             "sub": job_id,
@@ -194,8 +196,12 @@ def make_intent_mandate_payload(
         "sku_patterns": ["*"],
         "description": "Test intent",
         "requires_principal": requires_principal,
+        "allow_uw_override": allow_uw_override,
         "signature": "placeholder",
     }
+    if max_premium is not None:
+        result["max_premium"] = max_premium
+    return result
 
 
 def make_cart_mandate_payload(

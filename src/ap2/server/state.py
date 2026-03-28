@@ -240,6 +240,36 @@ def validate_ap2_transition(
                     "UW request blocked: intent mandate has requires_principal=False"
                 )
 
+        # Gate OVERRIDE_DECIDED in HNP mode on allow_uw_override
+        if et == AP2EventType.OVERRIDE_DECIDED.value:
+            if (
+                state.modality == Modality.HUMAN_NOT_PRESENT
+                and state.intent_mandate
+                and not state.intent_mandate.get("allow_uw_override", False)
+            ):
+                raise ConflictError(
+                    "Override blocked in human-not-present mode: "
+                    "intent mandate has allow_uw_override=False"
+                )
+
+        # Gate PREMIUM_PAID in HNP mode on max_premium
+        if et == AP2EventType.PREMIUM_PAID.value:
+            if state.modality == Modality.HUMAN_NOT_PRESENT and state.intent_mandate:
+                max_prem = state.intent_mandate.get("max_premium")
+                uw_premium = (
+                    state.uw_decision.get("premium", 0) if state.uw_decision else 0
+                ) or 0
+                if max_prem is None:
+                    raise ConflictError(
+                        "Premium payment blocked in human-not-present mode: "
+                        "max_premium not set in intent mandate"
+                    )
+                if uw_premium > max_prem:
+                    raise ConflictError(
+                        f"Premium payment blocked: premium {uw_premium} "
+                        f"exceeds max_premium {max_prem} in intent mandate"
+                    )
+
         _validate_base_transition(state, envelope)
         return
 

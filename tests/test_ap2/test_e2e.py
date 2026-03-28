@@ -746,3 +746,275 @@ class TestGuardrails:
         r = client.get(f"/jobs/{job_id}/mandates")
         assert r.status_code == 200
         assert r.json()["intent_mandate"] is None
+
+
+# ── HNP + UW auto-actions ────────────────────────────────────────────────────
+
+
+class TestHNPUWAutoActions:
+    def test_uw_auto_pay_premium_when_under_max(
+        self,
+        client,
+        user_keys,
+        agent_keys,
+        evaluator_keys,
+        cred_provider_keys,
+        merchant_keys,
+        processor_keys,
+        underwriter_keys,
+    ):
+        """In HNP mode with max_premium set, UW decide signals auto-payable."""
+        user_sk, user_pk = user_keys
+        _, agent_pk = agent_keys
+        _, eval_pk = evaluator_keys
+        _, cred_pk = cred_provider_keys
+        merchant_sk, merchant_pk = merchant_keys
+        _, processor_pk = processor_keys
+        uw_sk, uw_pk = underwriter_keys
+
+        agr = make_fund_moving_ap2_agreement_dict(
+            user_pk,
+            agent_pk,
+            eval_pk,
+            cred_pk,
+            merchant_pk,
+            processor_pk,
+            uw_pk,
+            modality="human-not-present",
+        )
+        req = make_ap2_create_request({"agreement": agr}, user_sk)
+        r = client.post("/jobs", json=req)
+        assert r.status_code == 201
+        job_id, agr_hash = r.json()["job_id"], r.json()["agreement_hash"]
+        _sign_both(client, job_id, agr_hash, user_sk, merchant_sk)
+
+        # Intent with max_premium=500
+        intent = make_intent_mandate_payload(
+            user_pk,
+            job_id,
+            budget=5000,
+            allowed_merchants=[merchant_pk],
+            requires_principal=True,
+            max_premium=500,
+        )
+        env = make_ap2_envelope(
+            "INTENT_MANDATE_CREATED", job_id, agr_hash, intent, user_sk,
+        )
+        client.post(f"/jobs/{job_id}/mandates/intent", json=env)
+
+        # Complete mandate flow (HNP)
+        cart = make_cart_mandate_payload(merchant_pk, job_id, total=2000)
+        env = make_ap2_envelope(
+            "CART_MANDATE_PROPOSED", job_id, agr_hash, cart, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart", json=env)
+        env = make_ap2_envelope(
+            "CART_MANDATE_SIGNED", job_id, agr_hash, {}, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart/sign", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_CREATED",
+            job_id,
+            agr_hash,
+            {"payment_token_hash": "tok"},
+            cred_provider_keys[0],
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_SIGNED", job_id, agr_hash, {}, cred_provider_keys[0]
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment/sign", json=env)
+
+        # Lock fee
+        env = make_ap2_envelope("FEE_ESCROW_LOCKED", job_id, agr_hash, {}, user_sk)
+        client.post(f"/jobs/{job_id}/fee/lock", json=env)
+
+        # UW request
+        env = make_ap2_envelope("UW_REQUESTED", job_id, agr_hash, {}, merchant_sk)
+        client.post(f"/jobs/{job_id}/uw/request", json=env)
+
+        # UW decides: premium=200 (under max_premium=500)
+        env = make_ap2_envelope(
+            "UW_DECIDED",
+            job_id,
+            agr_hash,
+            {"approve": True, "premium": 200, "collateral_required": 0},
+            uw_sk,
+        )
+        r = client.post(f"/jobs/{job_id}/uw/decide", json=env)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["auto_action"] == "premium_auto_payable"
+
+    def test_uw_block_when_premium_exceeds_max(
+        self,
+        client,
+        user_keys,
+        agent_keys,
+        evaluator_keys,
+        cred_provider_keys,
+        merchant_keys,
+        processor_keys,
+        underwriter_keys,
+    ):
+        """In HNP mode, premium > max_premium signals awaiting_human."""
+        user_sk, user_pk = user_keys
+        _, agent_pk = agent_keys
+        _, eval_pk = evaluator_keys
+        _, cred_pk = cred_provider_keys
+        merchant_sk, merchant_pk = merchant_keys
+        _, processor_pk = processor_keys
+        uw_sk, uw_pk = underwriter_keys
+
+        agr = make_fund_moving_ap2_agreement_dict(
+            user_pk,
+            agent_pk,
+            eval_pk,
+            cred_pk,
+            merchant_pk,
+            processor_pk,
+            uw_pk,
+            modality="human-not-present",
+        )
+        req = make_ap2_create_request({"agreement": agr}, user_sk)
+        r = client.post("/jobs", json=req)
+        job_id, agr_hash = r.json()["job_id"], r.json()["agreement_hash"]
+        _sign_both(client, job_id, agr_hash, user_sk, merchant_sk)
+
+        # Intent with max_premium=100
+        intent = make_intent_mandate_payload(
+            user_pk,
+            job_id,
+            budget=5000,
+            allowed_merchants=[merchant_pk],
+            requires_principal=True,
+            max_premium=100,
+        )
+        env = make_ap2_envelope(
+            "INTENT_MANDATE_CREATED", job_id, agr_hash, intent, user_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/intent", json=env)
+
+        # Minimal mandate flow
+        cart = make_cart_mandate_payload(merchant_pk, job_id, total=2000)
+        env = make_ap2_envelope(
+            "CART_MANDATE_PROPOSED", job_id, agr_hash, cart, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart", json=env)
+        env = make_ap2_envelope(
+            "CART_MANDATE_SIGNED", job_id, agr_hash, {}, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart/sign", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_CREATED",
+            job_id,
+            agr_hash,
+            {"payment_token_hash": "tok"},
+            cred_provider_keys[0],
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_SIGNED", job_id, agr_hash, {}, cred_provider_keys[0]
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment/sign", json=env)
+
+        env = make_ap2_envelope("FEE_ESCROW_LOCKED", job_id, agr_hash, {}, user_sk)
+        client.post(f"/jobs/{job_id}/fee/lock", json=env)
+        env = make_ap2_envelope("UW_REQUESTED", job_id, agr_hash, {}, merchant_sk)
+        client.post(f"/jobs/{job_id}/uw/request", json=env)
+
+        # UW decides: premium=500 (over max_premium=100)
+        env = make_ap2_envelope(
+            "UW_DECIDED",
+            job_id,
+            agr_hash,
+            {"approve": True, "premium": 500, "collateral_required": 0},
+            uw_sk,
+        )
+        r = client.post(f"/jobs/{job_id}/uw/decide", json=env)
+        assert r.status_code == 200
+        assert r.json()["auto_action"] == "awaiting_human"
+
+    def test_uw_reject_auto_override(
+        self,
+        client,
+        user_keys,
+        agent_keys,
+        evaluator_keys,
+        cred_provider_keys,
+        merchant_keys,
+        processor_keys,
+        underwriter_keys,
+    ):
+        """In HNP mode with allow_uw_override=True, UW rejection signals override."""
+        user_sk, user_pk = user_keys
+        _, agent_pk = agent_keys
+        _, eval_pk = evaluator_keys
+        _, cred_pk = cred_provider_keys
+        merchant_sk, merchant_pk = merchant_keys
+        _, processor_pk = processor_keys
+        uw_sk, uw_pk = underwriter_keys
+
+        agr = make_fund_moving_ap2_agreement_dict(
+            user_pk,
+            agent_pk,
+            eval_pk,
+            cred_pk,
+            merchant_pk,
+            processor_pk,
+            uw_pk,
+            modality="human-not-present",
+        )
+        req = make_ap2_create_request({"agreement": agr}, user_sk)
+        r = client.post("/jobs", json=req)
+        job_id, agr_hash = r.json()["job_id"], r.json()["agreement_hash"]
+        _sign_both(client, job_id, agr_hash, user_sk, merchant_sk)
+
+        # Intent with allow_uw_override=True
+        intent = make_intent_mandate_payload(
+            user_pk,
+            job_id,
+            budget=5000,
+            allowed_merchants=[merchant_pk],
+            requires_principal=True,
+            allow_uw_override=True,
+        )
+        env = make_ap2_envelope(
+            "INTENT_MANDATE_CREATED", job_id, agr_hash, intent, user_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/intent", json=env)
+
+        cart = make_cart_mandate_payload(merchant_pk, job_id, total=2000)
+        env = make_ap2_envelope(
+            "CART_MANDATE_PROPOSED", job_id, agr_hash, cart, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart", json=env)
+        env = make_ap2_envelope(
+            "CART_MANDATE_SIGNED", job_id, agr_hash, {}, merchant_sk
+        )
+        client.post(f"/jobs/{job_id}/mandates/cart/sign", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_CREATED",
+            job_id,
+            agr_hash,
+            {"payment_token_hash": "tok"},
+            cred_provider_keys[0],
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment", json=env)
+        env = make_ap2_envelope(
+            "PAYMENT_MANDATE_SIGNED", job_id, agr_hash, {}, cred_provider_keys[0]
+        )
+        client.post(f"/jobs/{job_id}/mandates/payment/sign", json=env)
+
+        env = make_ap2_envelope("FEE_ESCROW_LOCKED", job_id, agr_hash, {}, user_sk)
+        client.post(f"/jobs/{job_id}/fee/lock", json=env)
+        env = make_ap2_envelope("UW_REQUESTED", job_id, agr_hash, {}, merchant_sk)
+        client.post(f"/jobs/{job_id}/uw/request", json=env)
+
+        # UW rejects
+        env = make_ap2_envelope(
+            "UW_DECIDED", job_id, agr_hash, {"approve": False}, uw_sk,
+        )
+        r = client.post(f"/jobs/{job_id}/uw/decide", json=env)
+        assert r.status_code == 200
+        assert r.json()["auto_action"] == "override_recommended"

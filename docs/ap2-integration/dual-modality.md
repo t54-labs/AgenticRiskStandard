@@ -1,6 +1,6 @@
 # Dual Modality
 
-AP2-ARS supports two operating modalities that differ in how the cart is validated and who signs the payment mandate. Both modalities converge at `PAYMENT_SIGNED`, after which the same fee and principal track logic applies.
+AP2-ARS supports two operating modalities that differ in three protocol decision points: cart approval, payment signing, and UW override handling. Both modalities converge at `PAYMENT_SIGNED` for the mandate track, but continue to differ in how UW terms are resolved in the principal track.
 
 ## Human-Present Mode
 
@@ -86,3 +86,25 @@ or:
 ```
 
 Once set, the modality cannot be changed. All subsequent mandate operations are validated against it.
+
+## UW Override Handling by Modality
+
+The IntentMandate includes two optional fields that control UW behavior in human-not-present mode:
+
+`max_premium` (optional integer): the maximum premium the agent is pre-authorized to pay. If the underwriter requires a premium at or below this amount, the server signals that it can be auto-paid. If the premium exceeds this threshold or the field is not set, the transaction blocks until the human returns.
+
+`allow_uw_override` (boolean, default false): whether the agent is pre-authorized to override a UW rejection or refused terms. When true, the server signals that an override can proceed automatically. When false, the transaction blocks.
+
+The server does not auto-post events on behalf of the user. Instead, the UW decide and collateral refuse responses include an `auto_action` field that tells the agent what to do next:
+
+| auto_action | Meaning |
+|---|---|
+| `premium_auto_payable` | Premium is within max_premium; agent should post PREMIUM_PAID |
+| `override_recommended` | Override is pre-authorized; agent should post OVERRIDE_DECIDED |
+| `awaiting_human` | No pre-authorization; transaction blocks until human returns |
+
+In human-present mode, these fields are ignored. The user makes all decisions directly.
+
+### Collateral Decisions
+
+Collateral is the merchant's money, not the user's. The merchant decides whether to lock or refuse collateral. If the merchant refuses (`COLLATERAL_REFUSED`), the flow enters `OVERRIDE_PENDING`. In human-not-present mode, the server checks `allow_uw_override` and signals accordingly. The user/agent then decides whether to override (proceed without collateral protection, bearing full risk).

@@ -70,6 +70,8 @@ class IntentMandate(BaseModel):
     sku_patterns: list[str] = []  # glob patterns for allowed SKUs
     description: str  # natural language intent
     requires_principal: bool = False  # whether UW/principal track is needed
+    max_premium: Optional[int] = None  # auto-pay premium if ≤ this amount (HNP mode)
+    allow_uw_override: bool = False  # auto-override UW rejection/refusal (HNP mode)
     signature: str  # Ed25519 over canonical claims
 
 
@@ -106,9 +108,11 @@ class AP2AgreementDraft(BaseModel):
     job_type: str
     description: str
     modality: Modality
-    # 6 mandatory actors
+    # Actors
     user_pubkey: str
-    shopping_agent_pubkey: str
+    shopping_agent_pubkey: Optional[
+        str
+    ] = None  # optional; when provided, firewall enforced
     evaluator_pubkey: str
     credentials_provider_pubkey: str
     merchant_pubkey: str

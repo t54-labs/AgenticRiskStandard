@@ -413,13 +413,6 @@ def _pay_premium(client, job_id, agr_hash, req_sk, ref="premium://paid"):
     return resp.json()
 
 
-def _approve_release(client, job_id, agr_hash, req_sk):
-    env = make_envelope(EventType.RELEASE_APPROVED, job_id, agr_hash, {}, req_sk)
-    resp = client.post(f"/jobs/{job_id}/release/approve", json=env)
-    assert resp.status_code == 200, resp.json()
-    return resp.json()
-
-
 def _release_principal(client, job_id, agr_hash, settle_sk):
     env = make_envelope(EventType.PRINCIPAL_RELEASED, job_id, agr_hash, {}, settle_sk)
     resp = client.post(f"/jobs/{job_id}/principal/release", json=env)
@@ -575,10 +568,9 @@ def test_uw_reject_override_proceed(
     )
     resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
     assert resp.status_code == 200
-    assert resp.json()["principal_track_state"] == "APPROVAL_PENDING"
+    assert resp.json()["principal_track_state"] == "RELEASABLE"
 
-    # Approve + release
-    _approve_release(client, job_id, agr_hash, req_sk)
+    # Release (auto-RELEASABLE after override, no approval needed)
     xfer = _release_principal(client, job_id, agr_hash, settle_sk)
     assert "transfer_ref" in xfer
 
@@ -606,8 +598,8 @@ def test_uw_collateral_refused_override(
     _uw_request(client, job_id, agr_hash, agent_sk)
     _uw_decide(client, job_id, agr_hash, uw_sk, approve=True, collateral=5000)
 
-    # Refuse collateral
-    env = make_envelope(EventType.COLLATERAL_REFUSED, job_id, agr_hash, {}, req_sk)
+    # Merchant refuses collateral (it's their money)
+    env = make_envelope(EventType.COLLATERAL_REFUSED, job_id, agr_hash, {}, agent_sk)
     resp = client.post(f"/jobs/{job_id}/uw/collateral/refuse", json=env)
     assert resp.status_code == 200
     assert resp.json()["principal_track_state"] == "OVERRIDE_PENDING"
@@ -619,7 +611,6 @@ def test_uw_collateral_refused_override(
     resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
     assert resp.status_code == 200
 
-    _approve_release(client, job_id, agr_hash, req_sk)
     xfer = _release_principal(client, job_id, agr_hash, settle_sk)
     assert "transfer_ref" in xfer
 
@@ -664,7 +655,6 @@ def test_uw_premium_refused_override(
     resp = client.post(f"/jobs/{job_id}/uw/override", json=env)
     assert resp.status_code == 200
 
-    _approve_release(client, job_id, agr_hash, req_sk)
     xfer = _release_principal(client, job_id, agr_hash, settle_sk)
     assert "transfer_ref" in xfer
 
@@ -742,20 +732,13 @@ def test_cannot_release_before_approval_in_override_path(
     _sign_both(client, job_id, agr_hash, req_sk, agent_sk)
     _lock_fee(client, job_id, agr_hash, req_sk)
     _uw_request(client, job_id, agr_hash, agent_sk)
-    # UW rejects → override path
+    # UW rejects → OVERRIDE_PENDING
     _uw_decide(client, job_id, agr_hash, uw_sk, approve=False)
 
-    # Override
-    env = make_envelope(
-        EventType.OVERRIDE_DECIDED, job_id, agr_hash, {"decision": "proceed"}, req_sk,
-    )
-    client.post(f"/jobs/{job_id}/uw/override", json=env)
-
-    # State should be APPROVAL_PENDING (override path requires approval)
     state = client.get(f"/jobs/{job_id}").json()
-    assert state["principal_track_state"] == "APPROVAL_PENDING"
+    assert state["principal_track_state"] == "OVERRIDE_PENDING"
 
-    # Try to release without approval — should fail
+    # Try to release without override — should fail
     env = make_envelope(EventType.PRINCIPAL_RELEASED, job_id, agr_hash, {}, settle_sk)
     resp = client.post(f"/jobs/{job_id}/principal/release", json=env)
     assert resp.status_code == 409

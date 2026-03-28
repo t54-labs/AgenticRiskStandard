@@ -43,7 +43,6 @@ class EventType(str, Enum):
     COLLATERAL_LOCKED = "COLLATERAL_LOCKED"
     COLLATERAL_REFUSED = "COLLATERAL_REFUSED"
     OVERRIDE_DECIDED = "OVERRIDE_DECIDED"
-    RELEASE_APPROVED = "RELEASE_APPROVED"
     PRINCIPAL_RELEASED = "PRINCIPAL_RELEASED"
     EXECUTION_EVIDENCE_SUBMITTED = "EXECUTION_EVIDENCE_SUBMITTED"
 
@@ -64,7 +63,6 @@ class PrincipalTrackState(str, Enum):
     PREMIUM_PENDING = "PREMIUM_PENDING"
     COLLATERAL_REQUESTED = "COLLATERAL_REQUESTED"
     OVERRIDE_PENDING = "OVERRIDE_PENDING"
-    APPROVAL_PENDING = "APPROVAL_PENDING"
     RELEASABLE = "RELEASABLE"
     EXECUTION_PENDING = "EXECUTION_PENDING"
     EXECUTION_EVIDENCE_SUBMITTED = "EXECUTION_EVIDENCE_SUBMITTED"
@@ -161,6 +159,5 @@ class JobStateView(BaseModel):
     premium_ref: Optional[str] = None
     collateral_ref: Optional[str] = None
     override: Optional[dict] = None
-    release_approvals: dict[str, bool] = {}
     transfer_ref: Optional[str] = None
     exec_evidence_ref: Optional[str] = None

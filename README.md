@@ -44,7 +44,7 @@ ARS defines six participant roles. Each role is identified by an Ed25519 public 
 
 | Role | Description |
 |------|-------------|
-| **Requestor** | Creates jobs, locks fee escrow, pays premiums, approves principal release, submits override decisions |
+| **Requestor** | Creates jobs, locks fee escrow, pays premiums, submits override decisions (approves release only in override path) |
 | **Business Agent** | Signs agreements, submits deliverables, requests underwriting, locks collateral, submits execution evidence |
 | **Evaluator** | Independently evaluates deliverable quality (pass/fail verdict) |
 | **Underwriter** | Assesses risk for fund-moving jobs; approves/rejects with premium and collateral terms |
@@ -83,16 +83,18 @@ UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL
    Agent requests    Underwriter      Requestor pays         Business agent locks
    underwriting      decides          premium (if any)       collateral (if any)
                          │
-                    If rejected ──> OVERRIDE_PENDING ──> Requestor decides override
-                                                              │
-                                              ┌───────────────┘
-                                              v
-                                     APPROVAL_PENDING ──> RELEASABLE ──> EXECUTION_PENDING
-                                           │                    │                │
-                                      Requestor           Settlement        Agent submits
-                                      approves             layer            execution
-                                      release             releases          evidence
-                                                          principal
+                    Happy path: premium paid + collateral locked ──> RELEASABLE (auto)
+                                                                          │
+                    If rejected/refused ──> OVERRIDE_PENDING ──> Requestor overrides
+                                                                          │
+                                                              APPROVAL_PENDING ──> Requestor approves
+                                                                          │
+                                                                      RELEASABLE ──> EXECUTION_PENDING
+                                                                          │                │
+                                                                     Settlement        Agent submits
+                                                                       layer            execution
+                                                                      releases          evidence
+                                                                      principal
 ```
 
 ### Quickstart
@@ -448,9 +450,9 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/premium` | `PREMIUM_PAID` | Requestor | `{"premium_ref": "..."}` |
 | `POST` | `/jobs/{id}/uw/premium/refuse` | `PREMIUM_REFUSED` | Requestor | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Business Agent | `{}` |
-| `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Requestor | `{}` |
+| `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |
-| `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` |
+| `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` (override path only) |
 | `POST` | `/jobs/{id}/principal/release` | `PRINCIPAL_RELEASED` | Settlement Layer | `{}` |
 | `POST` | `/jobs/{id}/execution-evidence` | `EXECUTION_EVIDENCE_SUBMITTED` | Business Agent | `{"exec_evidence_ref": "..."}` |
 

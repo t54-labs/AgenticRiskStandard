@@ -64,7 +64,7 @@ def main():
         "description": "Exchange 100 USD to CAD",
         "modality": "human-present",
         "user_pubkey": user.pubkey,
-        "shopping_agent_pubkey": SigningKey.generate().verify_key.encode().hex(),
+        # shopping_agent_pubkey omitted — user acts as their own agent
         "evaluator_pubkey": evaluator.pubkey,
         "credentials_provider_pubkey": cred_provider.pubkey,
         "merchant_pubkey": merchant.pubkey,

@@ -44,7 +44,6 @@ class _Acc:
     collateral_refused: bool = False
     premium_amount: Optional[int] = None
     override: Optional[dict] = None
-    release_approvals: dict[str, bool] = field(default_factory=dict)
     transfer_ref: Optional[str] = None
     exec_evidence_ref: Optional[str] = None
 
@@ -103,12 +102,6 @@ def _override_ack(acc: _Acc) -> bool:
     return bool(acc.override and acc.override.get("decision") == "proceed")
 
 
-def _requestor_approved(acc: _Acc) -> bool:
-    if not acc.agreement:
-        return False
-    return acc.release_approvals.get(acc.agreement.requestor_pubkey, False)
-
-
 def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
     if not _agreement_bound(acc) or not _is_fund_moving(acc):
         return None
@@ -124,43 +117,32 @@ def _derive_principal_track(acc: _Acc) -> Optional[PrincipalTrackState]:
         return PrincipalTrackState.UW_REVIEW
 
     if not acc.uw_decision.get("approve"):
-        # rejected underwriting → override path (requires user approval)
-        if acc.override is None:
+        # rejected underwriting → override path
+        if not _override_ack(acc):
             return PrincipalTrackState.OVERRIDE_PENDING
-        if _requestor_approved(acc):
-            return PrincipalTrackState.RELEASABLE
-        return PrincipalTrackState.APPROVAL_PENDING
+        return PrincipalTrackState.RELEASABLE
 
     # approved underwriting
-    _used_override = False
     premium = acc.uw_decision.get("premium", 0) or 0
     if premium > 0 and acc.premium_ref is None:
         if acc.premium_refused:
-            # premium refused → need override to proceed
             if not _override_ack(acc):
                 return PrincipalTrackState.OVERRIDE_PENDING
-            _used_override = True
+            # override accepted, proceed past premium gate
         else:
             return PrincipalTrackState.PREMIUM_PENDING
 
     collateral_req = acc.uw_decision.get("collateral_required", 0) or 0
     if collateral_req > 0 and acc.collateral_ref is None:
         if acc.collateral_refused:
-            # collateral refused → need override to proceed
             if not _override_ack(acc):
                 return PrincipalTrackState.OVERRIDE_PENDING
-            _used_override = True
+            # override accepted, proceed past collateral gate
         else:
             return PrincipalTrackState.COLLATERAL_REQUESTED
 
-    # Happy path (no override): auto-release when coverage is satisfied
-    if not _used_override:
-        return PrincipalTrackState.RELEASABLE
-
-    # Override path: require user approval before release
-    if _requestor_approved(acc):
-        return PrincipalTrackState.RELEASABLE
-    return PrincipalTrackState.APPROVAL_PENDING
+    # All conditions satisfied (happy path or override) → auto-release
+    return PrincipalTrackState.RELEASABLE
 
 
 # ── Public: derive state ─────────────────────────────────────────────────────
@@ -226,9 +208,6 @@ def derive_job_state(events: list[Event]) -> JobStateView:
         elif ev.event_type == EventType.OVERRIDE_DECIDED:
             acc.override = ev.payload
 
-        elif ev.event_type == EventType.RELEASE_APPROVED:
-            acc.release_approvals[ev.actor] = True
-
         elif ev.event_type == EventType.PRINCIPAL_RELEASED:
             acc.transfer_ref = ev.payload.get("transfer_ref")
 
@@ -255,7 +234,6 @@ def derive_job_state(events: list[Event]) -> JobStateView:
         premium_ref=acc.premium_ref,
         collateral_ref=acc.collateral_ref,
         override=acc.override,
-        release_approvals=acc.release_approvals,
         transfer_ref=acc.transfer_ref,
         exec_evidence_ref=acc.exec_evidence_ref,
     )
@@ -375,20 +353,14 @@ def validate_transition(state: JobStateView, envelope: SignedActionEnvelope) -> 
             raise ConflictError(
                 "Collateral refusal requires COLLATERAL_REQUESTED state"
             )
-        if agr and envelope.actor != agr.requestor_pubkey:
-            raise ForbiddenError("Only requestor can refuse collateral")
+        if agr and envelope.actor != agr.business_agent_pubkey:
+            raise ForbiddenError("Only business agent can refuse collateral")
 
     elif et == EventType.OVERRIDE_DECIDED:
         if state.principal_track_state != PrincipalTrackState.OVERRIDE_PENDING:
             raise ConflictError("Override requires OVERRIDE_PENDING state")
         if agr and envelope.actor != agr.requestor_pubkey:
             raise ForbiddenError("Only requestor can submit override decision")
-
-    elif et == EventType.RELEASE_APPROVED:
-        if state.principal_track_state != PrincipalTrackState.APPROVAL_PENDING:
-            raise ConflictError("Release approval requires APPROVAL_PENDING state")
-        if agr and envelope.actor != agr.requestor_pubkey:
-            raise ForbiddenError("Only requestor can approve release")
 
     elif et == EventType.PRINCIPAL_RELEASED:
         if state.principal_track_state != PrincipalTrackState.RELEASABLE:

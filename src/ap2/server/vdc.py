@@ -57,6 +57,8 @@ def create_intent_mandate(
     sku_patterns: list[str] | None = None,
     ttl_seconds: int = 3600,
     requires_principal: bool = False,
+    max_premium: int | None = None,
+    allow_uw_override: bool = False,
 ) -> IntentMandate:
     """Create and sign an IntentMandate VDC."""
     now = datetime.now(timezone.utc)
@@ -90,6 +92,8 @@ def create_intent_mandate(
         sku_patterns=sku_patterns or [],
         description=description,
         requires_principal=requires_principal,
+        max_premium=max_premium,
+        allow_uw_override=allow_uw_override,
         signature="",  # placeholder, will be replaced
     )
     claims = _claims_dict(mandate)

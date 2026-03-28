@@ -50,10 +50,10 @@ def create_app(
         get_store=_store,
         event_types={m.name: m.value for m in AP2EventType},
     )
-    application.include_router(shared)
-
-    # Override routes (create_job, fee lock/settle, collateral lock, principal release)
+    # Override routes first (take precedence over shared routes)
     _register_override_routes(application)
+
+    application.include_router(shared)
 
     # AP2-only routes (mandates, constraints)
     _register_mandate_routes(application)
@@ -306,11 +306,96 @@ def _register_override_routes(application: FastAPI) -> None:
         payload = {
             **envelope.payload,
             "transfer_ref": result.ref,
-            "approvals": state.release_approvals,
         }
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
         return {"job_id": job_id, "transfer_ref": result.ref}
+
+    @application.post("/jobs/{job_id}/uw/decide")
+    async def uw_decide(
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
+    ):
+        """AP2 override: UW decide with modality-aware auto-actions."""
+        store = _store(request)
+        if not store.job_exists(job_id):
+            raise NotFoundError(f"Job {job_id} not found")
+        if "approve" not in envelope.payload:
+            raise BadRequestError("payload.approve is required")
+
+        new_state = _append_validated(
+            store, job_id, envelope, AP2EventType.UW_DECIDED.value,
+        )
+
+        resp = {
+            "job_id": job_id,
+            "principal_track_state": new_state.principal_track_state.value
+            if new_state.principal_track_state
+            else None,
+            "approve": envelope.payload["approve"],
+        }
+
+        # Auto-actions in human-not-present mode
+        if new_state.modality != Modality.HUMAN_NOT_PRESENT:
+            return resp
+        if not new_state.intent_mandate:
+            return resp
+
+        intent = IntentMandate(**new_state.intent_mandate)
+        approved = envelope.payload.get("approve", False)
+        premium = envelope.payload.get("premium", 0) or 0
+
+        if not approved and intent.allow_uw_override:
+            resp["auto_action"] = "override_recommended"
+            resp["reason"] = "UW rejected, allow_uw_override=True in intent"
+
+        elif approved and premium > 0 and intent.max_premium is not None:
+            if premium <= intent.max_premium:
+                resp["auto_action"] = "premium_auto_payable"
+                resp["reason"] = f"Premium {premium} ≤ max_premium {intent.max_premium}"
+            else:
+                resp["auto_action"] = "awaiting_human"
+                resp["reason"] = f"Premium {premium} > max_premium {intent.max_premium}"
+
+        elif approved and premium > 0 and intent.max_premium is None:
+            resp["auto_action"] = "awaiting_human"
+            resp["reason"] = "Premium required but max_premium not set in intent"
+
+        return resp
+
+    @application.post("/jobs/{job_id}/uw/collateral/refuse")
+    async def refuse_collateral(
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
+    ):
+        """AP2 override: collateral refuse with modality-aware auto-actions."""
+        store = _store(request)
+        if not store.job_exists(job_id):
+            raise NotFoundError(f"Job {job_id} not found")
+
+        new_state = _append_validated(
+            store, job_id, envelope, AP2EventType.COLLATERAL_REFUSED.value,
+        )
+
+        resp = {
+            "job_id": job_id,
+            "principal_track_state": new_state.principal_track_state.value
+            if new_state.principal_track_state
+            else None,
+        }
+
+        # Auto-actions in human-not-present mode
+        if (
+            new_state.modality == Modality.HUMAN_NOT_PRESENT
+            and new_state.intent_mandate
+        ):
+            intent = IntentMandate(**new_state.intent_mandate)
+            if intent.allow_uw_override:
+                resp["auto_action"] = "override_recommended"
+                resp["reason"] = "Collateral refused, allow_uw_override=True in intent"
+            else:
+                resp["auto_action"] = "awaiting_human"
+                resp["reason"] = "Collateral refused, allow_uw_override=False"
+
+        return resp
 
 
 # ── Mandate routes (AP2-only) ────────────────────────────────────────────────

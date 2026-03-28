@@ -92,13 +92,3 @@ class RequestorClient(BaseClient):
             payload={"decision": decision},
         )
         return UWResponse(**data)
-
-    def approve_release(self, job_id: str, agreement_hash: str) -> UWResponse:
-        """POST /jobs/{id}/release/approve — approve principal release."""
-        data = self._post_envelope(
-            f"/jobs/{job_id}/release/approve",
-            "RELEASE_APPROVED",
-            job_id,
-            agreement_hash,
-        )
-        return UWResponse(**data)

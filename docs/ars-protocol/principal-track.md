@@ -7,14 +7,18 @@ The principal track adds underwriting protection for high-value or high-risk tra
 The principal track has more states than the fee track because it involves multi-party negotiation around risk terms:
 
 ```
-UW_AWAIT_REQUEST → UW_REVIEW → [PREMIUM_PENDING] → [COLLATERAL_REQUESTED]
+Happy path:
+  UW_AWAIT_REQUEST → UW_REVIEW → [PREMIUM_PENDING] → [COLLATERAL_REQUESTED]
                                                           ↓
-                                            APPROVAL_PENDING → RELEASABLE
+                                                      RELEASABLE (auto)
                                                           ↓
                                             EXECUTION_PENDING → EXECUTION_EVIDENCE_SUBMITTED
+
+Override path (refused terms):
+  ... → OVERRIDE_PENDING → APPROVAL_PENDING → RELEASABLE → ...
 ```
 
-Several states are conditional. `PREMIUM_PENDING` only appears if the underwriter requires a premium. `COLLATERAL_REQUESTED` only appears if the underwriter requires collateral. The override path branches off when the requestor refuses terms.
+Several states are conditional. `PREMIUM_PENDING` only appears if the underwriter requires a premium. `COLLATERAL_REQUESTED` only appears if the underwriter requires collateral.
 
 ## States
 
@@ -26,11 +30,11 @@ Several states are conditional. `PREMIUM_PENDING` only appears if the underwrite
 
 **COLLATERAL_REQUESTED** appears when the underwriter requires collateral. The business agent must lock their own funds as a delivery guarantee, or the requestor can refuse on their behalf.
 
+**RELEASABLE** is reached automatically in the happy path once all coverage conditions are satisfied (premium paid, collateral locked). No user approval is needed. The settlement layer can execute the fund transfer.
+
 **OVERRIDE_PENDING** appears in three scenarios: (1) the underwriter rejects the transaction entirely, (2) the requestor refuses to pay the premium, or (3) the requestor refuses collateral. In all cases, the requestor can override the underwriter's terms and proceed without coverage.
 
-**APPROVAL_PENDING** means all prerequisite conditions are satisfied (coverage is bound or overridden). The requestor must approve the principal release.
-
-**RELEASABLE** means the requestor has approved. The settlement layer can now execute the fund transfer.
+**APPROVAL_PENDING** appears only in the override path, after the requestor has overridden UW terms. Since coverage is not satisfied, the requestor must explicitly approve principal release, accepting the additional risk.
 
 **EXECUTION_PENDING** means the principal has been released. The business agent must submit execution evidence (proof that the funds were used as intended).
 
@@ -57,9 +61,9 @@ In all override cases, the transaction continues without underwriter protection.
 | Pay premium | Requestor |
 | Refuse premium | Requestor |
 | Lock collateral | Business Agent |
-| Refuse collateral | Requestor |
+| Refuse collateral | Business Agent |
 | Override | Requestor |
-| Approve release | Requestor |
+| Approve release (override path only) | Requestor |
 | Release principal | Settlement Layer |
 | Submit execution evidence | Business Agent |
 

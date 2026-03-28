@@ -283,22 +283,6 @@ def create_shared_router(
             "decision": envelope.payload["decision"],
         }
 
-    @router.post("/jobs/{job_id}/release/approve")
-    async def approve_release(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = get_store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        new_state = _append(store, job_id, envelope, event_types["RELEASE_APPROVED"],)
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-        }
-
     @router.post("/jobs/{job_id}/execution-evidence")
     async def submit_execution_evidence(
         job_id: str, envelope: SignedActionEnvelope, request: Request,

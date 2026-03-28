@@ -27,12 +27,13 @@ class RoleRegistry:
         self._agreement = agreement
         self._map: dict[str, AP2Role] = {
             agreement.user_pubkey: AP2Role.USER,
-            agreement.shopping_agent_pubkey: AP2Role.SHOPPING_AGENT,
             agreement.evaluator_pubkey: AP2Role.EVALUATOR,
             agreement.credentials_provider_pubkey: AP2Role.CREDENTIALS_PROVIDER,
             agreement.merchant_pubkey: AP2Role.MERCHANT,
             agreement.payment_processor_pubkey: AP2Role.PAYMENT_PROCESSOR,
         }
+        if agreement.shopping_agent_pubkey:
+            self._map[agreement.shopping_agent_pubkey] = AP2Role.SHOPPING_AGENT
         if agreement.underwriter_pubkey:
             self._map[agreement.underwriter_pubkey] = AP2Role.UNDERWRITER
 
@@ -49,9 +50,10 @@ class RoleRegistry:
 
     def validate_firewall(self) -> None:
         """Enforce: shopping agent must NOT share a key with credentials provider
-        or payment processor. This is the AP2 cryptographic firewall — the agent
-        can orchestrate but never touch payment data."""
+        or payment processor. Only checked when shopping_agent_pubkey is provided."""
         agr = self._agreement
+        if not agr.shopping_agent_pubkey:
+            return  # no separate agent, no firewall needed
         if agr.shopping_agent_pubkey == agr.credentials_provider_pubkey:
             raise BadRequestError(
                 "Firewall violation: shopping_agent and credentials_provider share a key"

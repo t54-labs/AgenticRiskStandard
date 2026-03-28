@@ -264,7 +264,6 @@ def _register_override_routes(application: FastAPI) -> None:
         payload = {
             **envelope.payload,
             "transfer_ref": result.ref,
-            "approvals": state.release_approvals,
         }
         envelope = envelope.model_copy(update={"payload": payload})
         store.append_event(envelope)
