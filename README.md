@@ -31,7 +31,7 @@ When a human (or organization) delegates a task to an AI agent, both sides need 
 
 - Every action is an **Ed25519-signed event** appended to an immutable log
 - Fees are held in **escrow** until an independent evaluator confirms delivery
-- For high-value fund-moving jobs, an **underwriting track** gates principal release behind risk assessment, collateral, and multi-party approval
+- For high-value fund-moving jobs, an **underwriting track** gates principal release behind risk assessment, collateral, and optional override
 - All state is **derived by replaying the event log** — there is no mutable state to corrupt
 
 ---
@@ -44,7 +44,7 @@ ARS defines six participant roles. Each role is identified by an Ed25519 public 
 
 | Role | Description |
 |------|-------------|
-| **Requestor** | Creates jobs, locks fee escrow, pays premiums, submits override decisions (approves release only in override path) |
+| **Requestor** | Creates jobs, locks fee escrow, pays premiums, submits override decisions |
 | **Business Agent** | Signs agreements, submits deliverables, requests underwriting, locks collateral, submits execution evidence |
 | **Evaluator** | Independently evaluates deliverable quality (pass/fail verdict) |
 | **Underwriter** | Assesses risk for fund-moving jobs; approves/rejects with premium and collateral terms |
@@ -87,13 +87,11 @@ UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL
                                                                           │
                     If rejected/refused ──> OVERRIDE_PENDING ──> Requestor overrides
                                                                           │
-                                                              APPROVAL_PENDING ──> Requestor approves
-                                                                          │
-                                                                      RELEASABLE ──> EXECUTION_PENDING
-                                                                          │                │
-                                                                     Settlement        Agent submits
-                                                                       layer            execution
-                                                                      releases          evidence
+                                                                      RELEASABLE (auto) ──> EXECUTION_PENDING
+                                                                          │                        │
+                                                                     Settlement              Agent submits
+                                                                       layer                  execution
+                                                                      releases                evidence
                                                                       principal
 ```
 
@@ -452,7 +450,6 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 | `POST` | `/jobs/{id}/uw/collateral/lock` | `COLLATERAL_LOCKED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/collateral/refuse` | `COLLATERAL_REFUSED` | Business Agent | `{}` |
 | `POST` | `/jobs/{id}/uw/override` | `OVERRIDE_DECIDED` | Requestor | `{"decision": "proceed"}` |
-| `POST` | `/jobs/{id}/release/approve` | `RELEASE_APPROVED` | Requestor | `{}` (override path only) |
 | `POST` | `/jobs/{id}/principal/release` | `PRINCIPAL_RELEASED` | Settlement Layer | `{}` |
 | `POST` | `/jobs/{id}/execution-evidence` | `EXECUTION_EVIDENCE_SUBMITTED` | Business Agent | `{"exec_evidence_ref": "..."}` |
 

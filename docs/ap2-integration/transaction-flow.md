@@ -42,7 +42,7 @@ When the IntentMandate has `requires_principal = True` and the agreement include
 2. **Underwriter assesses risk** and issues a decision with premium and collateral terms.
 3. **User pays premium** (insurance cost) or refuses and overrides.
 4. **Merchant locks collateral** (delivery guarantee) or refuses and the user overrides.
-5. In the happy path (premium paid + collateral locked), the **principal is automatically released** to the merchant. In the override path (terms refused), the user must explicitly approve release first.
+5. Principal release is always automatic. In the happy path (premium paid + collateral locked), the state goes directly to `RELEASABLE`. In the override path (terms refused), the override itself is the authorization and the state also goes to `RELEASABLE`. No separate approval step exists.
 6. **Merchant submits execution evidence** proving the funds were used as intended.
 
 Collateral handling is automatic: when the fee is settled, the server unlocks collateral on pass (returned to merchant) or slashes it on fail (seized to treasury). No separate action is needed.

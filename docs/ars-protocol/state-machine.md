@@ -32,7 +32,6 @@ State is computed by `derive_job_state(events)`, which initializes an accumulato
 - Settlement reference and action
 - UW decision, premium, collateral status
 - Override decisions
-- Release approvals
 - Transfer reference and execution evidence
 
 After replaying all events, the function derives the phase, fee track state, and principal track state from the accumulated data.
@@ -59,7 +58,7 @@ The protocol defines 18 event types across both tracks:
 `JOB_CREATED`, `PROPOSAL_SUBMITTED`, `AGREEMENT_SIGNED`, `FEE_ESCROW_LOCKED`, `DELIVERABLE_SUBMITTED`, `OUTCOME_EVALUATED`, `FEE_SETTLED`
 
 **Principal track events:**
-`UW_REQUESTED`, `UW_DECIDED`, `PREMIUM_PAID`, `PREMIUM_REFUSED`, `COLLATERAL_LOCKED`, `COLLATERAL_REFUSED`, `OVERRIDE_DECIDED`, `RELEASE_APPROVED`, `PRINCIPAL_RELEASED`, `EXECUTION_EVIDENCE_SUBMITTED`
+`UW_REQUESTED`, `UW_DECIDED`, `PREMIUM_PAID`, `PREMIUM_REFUSED`, `COLLATERAL_LOCKED`, `COLLATERAL_REFUSED`, `OVERRIDE_DECIDED`, `PRINCIPAL_RELEASED`, `EXECUTION_EVIDENCE_SUBMITTED`
 
 ## Shared Router
 

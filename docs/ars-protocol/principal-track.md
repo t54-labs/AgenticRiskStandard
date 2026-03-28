@@ -15,7 +15,7 @@ Happy path:
                                             EXECUTION_PENDING → EXECUTION_EVIDENCE_SUBMITTED
 
 Override path (refused terms):
-  ... → OVERRIDE_PENDING → APPROVAL_PENDING → RELEASABLE → ...
+  ... → OVERRIDE_PENDING → OVERRIDE_DECIDED → RELEASABLE → ...
 ```
 
 Several states are conditional. `PREMIUM_PENDING` only appears if the underwriter requires a premium. `COLLATERAL_REQUESTED` only appears if the underwriter requires collateral.
@@ -34,7 +34,7 @@ Several states are conditional. `PREMIUM_PENDING` only appears if the underwrite
 
 **OVERRIDE_PENDING** appears in three scenarios: (1) the underwriter rejects the transaction entirely, (2) the requestor refuses to pay the premium, or (3) the requestor refuses collateral. In all cases, the requestor can override the underwriter's terms and proceed without coverage.
 
-**APPROVAL_PENDING** appears only in the override path, after the requestor has overridden UW terms. Since coverage is not satisfied, the requestor must explicitly approve principal release, accepting the additional risk.
+In the override path, once the requestor submits `OVERRIDE_DECIDED` with `decision: "proceed"`, the state moves directly to `RELEASABLE`. No separate approval step is needed. The override IS the authorization.
 
 **EXECUTION_PENDING** means the principal has been released. The business agent must submit execution evidence (proof that the funds were used as intended).
 
@@ -63,7 +63,6 @@ In all override cases, the transaction continues without underwriter protection.
 | Lock collateral | Business Agent |
 | Refuse collateral | Business Agent |
 | Override | Requestor |
-| Approve release (override path only) | Requestor |
 | Release principal | Settlement Layer |
 | Submit execution evidence | Business Agent |
 

@@ -16,7 +16,7 @@ The **principal track** adds underwriting protection for higher-value or higher-
 
 ARS defines five participant roles, each identified by an Ed25519 public key:
 
-**Requestor** creates jobs, locks fee escrow, pays premiums, and can override underwriter decisions. In the override path (when refusing UW terms), the requestor must also approve principal release.
+**Requestor** creates jobs, locks fee escrow, pays premiums, and can override underwriter decisions. Principal release is always automatic once conditions are met (coverage satisfied or override accepted).
 
 **Business Agent** signs agreements, submits deliverables, requests underwriting, locks collateral, and submits execution evidence.
 

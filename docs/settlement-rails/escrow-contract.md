@@ -10,7 +10,7 @@ The x402 payment rail can transfer USDC between wallets, but it cannot hold fund
 
 **recordDeposit(jobId, type, payer, payee, amount)** tags a deposit after x402 has transferred USDC into the contract. The deposit is keyed by `(jobId, type)` where type is FEE (0), COLLATERAL (1), or PRINCIPAL (2). A job can have up to three deposits: one of each type.
 
-**release(jobId, type)** sends the deposited USDC to the payee. Used when a deliverable passes evaluation (for fee deposits) or when principal release is approved.
+**release(jobId, type)** sends the deposited USDC to the payee. Used when a deliverable passes evaluation (for fee deposits) or when principal becomes releasable.
 
 **refund(jobId, type)** returns the deposited USDC to the payer. Used when a deliverable fails evaluation or when collateral is unlocked after successful delivery.
 

@@ -17,7 +17,7 @@ class EscrowClient(ABC):
 
 **record_deposit** tags a deposit after funds have been transferred. It takes the job ID, deposit type (FEE, COLLATERAL, or PRINCIPAL), payer address, payee address, and amount. Returns a transaction hash or reference.
 
-**release** sends funds from the deposit to the payee. Used when a deliverable passes evaluation (fee) or when principal release is approved.
+**release** sends funds from the deposit to the payee. Used when a deliverable passes evaluation (fee) or when principal becomes releasable.
 
 **refund** returns funds to the payer. Used when a deliverable fails evaluation.
 
