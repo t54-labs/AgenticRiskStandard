@@ -26,10 +26,14 @@ client = [
     "httpx>=0.27",
     "click>=8.0",
 ]
+vi = [
+    "cryptography>=42.0",
+]
 
 [project.scripts]
 ars-cli = "ars_client.cli:main"
 ap2-cli = "ap2.client.cli:main"
+vi-cli = "vi.client.cli:main"
 
 [project.urls]
 Repository = "https://github.com/anthropics/ARS"
@@ -51,4 +55,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["ars*", "ap2*"]
+include = ["ars*", "ap2*", "vi*"]
