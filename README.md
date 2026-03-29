@@ -1,5 +1,10 @@
 # Agentic Risk Standard
 
+<p align="center">
+  <img width="607" height="388" alt="Screenshot 2026-03-29 at 12 55 39 AM" src="https://github.com/user-attachments/assets/30a39b4c-95c4-4c8c-bc69-ec184ee1ec78" />
+</p>
+
+
 A settlement-layer protocol for trustworthy AI agent services. ARS provides cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks.
 
 **ARS is designed as an abstract protocol with pluggable concrete implementations.** The `abstract_ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
