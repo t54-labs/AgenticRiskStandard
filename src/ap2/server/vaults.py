@@ -1,18 +1,11 @@
-"""AP2 live escrow implementation (web3.py) + re-exports from abstract_ars.escrow."""
+"""AP2 live vault implementations (web3.py) for ARSEscrow.sol on-chain contract."""
 
 from __future__ import annotations
 
 from enum import IntEnum
 from typing import Optional
 
-from abstract_ars.vaults import (  # noqa: F401 — re-export for backward compat
-    CollateralVault,
-    DepositInfo,
-    DepositStatus,
-    FeeEscrow,
-    MockCollateralVault,
-    MockFeeEscrow,
-)
+from abstract_ars.vaults import CollateralVault, DepositInfo, DepositStatus, FeeEscrow
 
 
 class DepositType(IntEnum):
@@ -20,15 +13,13 @@ class DepositType(IntEnum):
 
     FEE = 0
     COLLATERAL = 1
-    PRINCIPAL = 2
 
 
-class LiveEscrowClient:
-    """Calls the ARSEscrow contract on-chain via web3.py.
+# ── Shared web3 boilerplate ─────────────────────────────────────────────────
 
-    This is the AP2-specific on-chain implementation that maps to the
-    ARSEscrow.sol contract's DepositType enum. It implements both
-    FeeEscrow and CollateralVault operations via a unified contract.
+
+class _LiveEscrowBase:
+    """Shared web3.py setup for ARSEscrow.sol contract interaction.
 
     Requires ``pip install web3``.
     """
@@ -63,33 +54,59 @@ class LiveEscrowClient:
         tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
         return tx_hash.hex()
 
-    # Fee operations
-    async def lock_fee(self, job_id: str, payer: str, payee: str, amount: int,) -> str:
+
+# ── Fee Escrow (on-chain) ────────────────────────────────────────────────────
+
+
+class LiveFeeEscrow(_LiveEscrowBase, FeeEscrow):
+    """On-chain fee escrow via ARSEscrow.sol. Also handles principal deposits."""
+
+    async def lock(self, job_id: str, payer: str, payee: str, amount: int) -> str:
         fn = self._contract.functions.recordDeposit(
             self._job_id_bytes(job_id), int(DepositType.FEE), payer, payee, amount,
         )
         return self._build_and_send(fn)
 
-    async def release_fee(self, job_id: str) -> str:
+    async def release(self, job_id: str) -> str:
         fn = self._contract.functions.release(
             self._job_id_bytes(job_id), int(DepositType.FEE),
         )
         return self._build_and_send(fn)
 
-    async def refund_fee(self, job_id: str) -> str:
+    async def refund(self, job_id: str) -> str:
         fn = self._contract.functions.refund(
             self._job_id_bytes(job_id), int(DepositType.FEE),
         )
         return self._build_and_send(fn)
 
-    # Collateral operations
-    async def lock_collateral(self, job_id: str, payer: str, amount: int) -> str:
+    async def get_status(self, job_id: str) -> Optional[DepositInfo]:
+        result = self._contract.functions.getDeposit(
+            self._job_id_bytes(job_id), int(DepositType.FEE),
+        ).call()
+        if result[3] == 0:
+            return None
+        return DepositInfo(
+            job_id=job_id,
+            payer=result[1],
+            payee=result[2],
+            amount=result[3],
+            status=DepositStatus(result[5]),
+        )
+
+
+# ── Collateral Vault (on-chain) ─────────────────────────────────────────────
+
+
+class LiveCollateralVault(_LiveEscrowBase, CollateralVault):
+    """On-chain collateral vault via ARSEscrow.sol."""
+
+    async def lock(self, job_id: str, payer: str, amount: int) -> str:
         fn = self._contract.functions.recordDeposit(
             self._job_id_bytes(job_id), int(DepositType.COLLATERAL), payer, "", amount,
         )
         return self._build_and_send(fn)
 
-    async def unlock_collateral(self, job_id: str) -> str:
+    async def unlock(self, job_id: str) -> str:
         fn = self._contract.functions.refund(
             self._job_id_bytes(job_id), int(DepositType.COLLATERAL),
         )
@@ -99,21 +116,16 @@ class LiveEscrowClient:
         fn = self._contract.functions.slash(self._job_id_bytes(job_id), recipient)
         return self._build_and_send(fn)
 
-    # Principal operations
-    async def record_principal(
-        self, job_id: str, payer: str, payee: str, amount: int,
-    ) -> str:
-        fn = self._contract.functions.recordDeposit(
-            self._job_id_bytes(job_id),
-            int(DepositType.PRINCIPAL),
-            payer,
-            payee,
-            amount,
+    async def get_status(self, job_id: str) -> Optional[DepositInfo]:
+        result = self._contract.functions.getDeposit(
+            self._job_id_bytes(job_id), int(DepositType.COLLATERAL),
+        ).call()
+        if result[3] == 0:
+            return None
+        return DepositInfo(
+            job_id=job_id,
+            payer=result[1],
+            payee="",
+            amount=result[3],
+            status=DepositStatus(result[5]),
         )
-        return self._build_and_send(fn)
-
-    async def release_principal(self, job_id: str) -> str:
-        fn = self._contract.functions.release(
-            self._job_id_bytes(job_id), int(DepositType.PRINCIPAL),
-        )
-        return self._build_and_send(fn)

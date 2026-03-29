@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ap2.server.settlement import MockSettlementLayer
+from abstract_ars.settlement import MockSettlementLayer
 
 
 @pytest.mark.asyncio

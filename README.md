@@ -252,7 +252,7 @@ For real on-chain settlement, pass a configured `SettlementLayer`:
 ```python
 from ap2.server.server import create_app
 from ap2.server.x402 import LiveX402Settlement
-from ap2.server.escrow import LiveEscrowClient
+from ap2.server.vaults import LiveFeeEscrow, LiveCollateralVault
 from ap2.server.settlement import LiveSettlementLayer
 
 x402 = LiveX402Settlement(
@@ -260,13 +260,17 @@ x402 = LiveX402Settlement(
     pay_to="<escrow-contract-address>",
     network="eip155:8453",  # Base Mainnet
 )
-escrow = LiveEscrowClient(
+contract_args = dict(
     rpc_url="https://mainnet.base.org",
     contract_address="<deployed-ARSEscrow-address>",
     abi=...,  # load from ap2/server/contracts/ars_escrow_abi.json
     operator_key="<operator-private-key>",
 )
-settlement = LiveSettlementLayer(x402=x402, escrow=escrow)
+fee_escrow = LiveFeeEscrow(**contract_args)
+collateral_vault = LiveCollateralVault(**contract_args)
+settlement = LiveSettlementLayer(
+    x402=x402, fee_escrow=fee_escrow, collateral_vault=collateral_vault,
+)
 app = create_app(settlement=settlement)
 ```
 
@@ -280,8 +284,8 @@ src/ap2/
     roles.py         # 6-actor RoleRegistry + cryptographic firewall
     constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
     x402.py          # x402 payment rail (internal transport)
-    escrow.py        # LiveEscrowClient (web3.py, re-exports from abstract_ars.vaults)
-    settlement.py    # LiveSettlementLayer (x402 + escrow, re-exports from abstract_ars.settlement)
+    vaults.py        # LiveFeeEscrow + LiveCollateralVault (web3.py, extend abstract_ars ABCs)
+    settlement.py    # LiveSettlementLayer (x402 + vaults)
     state.py         # Composite state machine: mandate authorization + base tracks
     server.py        # FastAPI app: shared router + override + mandate endpoints
   client/

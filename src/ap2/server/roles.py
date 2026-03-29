@@ -11,13 +11,16 @@ from .models import AP2AgreementDraft
 
 
 class AP2Role(str, Enum):
+    # Decision-making actors (humans or agents making choices)
     USER = "user"
-    SHOPPING_AGENT = "shopping_agent"
+    SHOPPING_AGENT = "shopping_agent"  # optional; user's AI proxy
     EVALUATOR = "evaluator"
-    CREDENTIALS_PROVIDER = "credentials_provider"
     MERCHANT = "merchant"
+    UNDERWRITER = "underwriter"  # optional; only for fund-moving jobs
+    # Server-side infrastructure (executes operations, doesn't make decisions;
+    # listed here for signature verification and firewall enforcement)
+    CREDENTIALS_PROVIDER = "credentials_provider"
     PAYMENT_PROCESSOR = "payment_processor"
-    UNDERWRITER = "underwriter"
 
 
 class RoleRegistry:

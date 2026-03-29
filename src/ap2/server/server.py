@@ -23,7 +23,7 @@ from .models import (
     Modality,
 )
 from .roles import RoleRegistry
-from .settlement import MockSettlementLayer, SettlementLayer
+from abstract_ars.settlement import MockSettlementLayer, SettlementLayer
 from .state import derive_ap2_job_state, validate_ap2_transition
 
 

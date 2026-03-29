@@ -59,6 +59,7 @@ class SettleResult:
 
 
 # ── Abstract interface ────────────────────────────────────────────────────────
+# set so that the interface between real x402 settlement and mockx402settlement is unified
 
 
 class X402Settlement(ABC):
@@ -122,6 +123,7 @@ class LiveX402Settlement(X402Settlement):
         self._network = network
         self._asset = USDC_ADDRESSES.get(network, "")
 
+    # currently x402 only supports USDC, so "currency" is not actually used
     async def create_payment_requirement(
         self, job_id: str, amount: int, currency: str,
     ) -> PaymentRequirement:

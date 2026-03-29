@@ -11,13 +11,16 @@ from .models import VIAgreementDraft
 
 
 class VIRole(str, Enum):
+    # Decision-making actors (humans or agents making choices)
     USER = "user"
-    AGENT = "agent"
+    AGENT = "agent"  # optional; user's AI proxy, creates L3 credentials
     EVALUATOR = "evaluator"
-    CREDENTIAL_PROVIDER = "credential_provider"
     MERCHANT = "merchant"
-    PAYMENT_NETWORK = "payment_network"
-    UNDERWRITER = "underwriter"
+    UNDERWRITER = "underwriter"  # optional; only for fund-moving jobs
+    # Server-side infrastructure (executes operations, doesn't make decisions;
+    # listed here for signature verification and firewall enforcement)
+    CREDENTIAL_PROVIDER = "credential_provider"  # issues L1, verifies chains
+    PAYMENT_NETWORK = "payment_network"  # verifies chains, settles
 
 
 class VIRoleRegistry:

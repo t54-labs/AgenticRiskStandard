@@ -154,7 +154,7 @@ class MockSettlementLayer(SettlementLayer):
         destination: Optional[str],
         payment_payload: Optional[dict] = None,
     ) -> SettleActionResult:
-        principal_key = f"principal:{job_id}"
-        await self._fee_escrow.lock(principal_key, "", destination or "", amount)
-        release_tx = await self._fee_escrow.release(principal_key)
-        return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")
+        # Principal is a direct transfer, not escrowed
+        return SettleActionResult(
+            tx_hash=f"principal_tx:{job_id[:8]}", ref=f"transfer:{job_id}",
+        )
