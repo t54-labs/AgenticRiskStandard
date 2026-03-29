@@ -1,4 +1,6 @@
-# Agentic Risk Standard
+<p align="center">
+  <strong>Agentic Risk Standard</strong>
+</p>
 
 <p align="center">
   <img width="607" height="388" alt="Screenshot 2026-03-29 at 12 55 39 AM" src="https://github.com/user-attachments/assets/30a39b4c-95c4-4c8c-bc69-ec184ee1ec78" />
