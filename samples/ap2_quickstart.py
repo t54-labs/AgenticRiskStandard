@@ -20,9 +20,9 @@ from fastapi.testclient import TestClient
 from ap2.server.server import create_app
 from ap2.client.user import UserClient
 from ap2.client.merchant import MerchantClient
-from ars_client.evaluator import EvaluatorClient
-from ars_client.underwriter import UnderwriterClient
-from ars_client._transport import Transport
+from abstract_ars_client.evaluator import EvaluatorClient
+from abstract_ars_client.underwriter import UnderwriterClient
+from abstract_ars_client._transport import Transport
 
 
 def make_client(cls, test_client):

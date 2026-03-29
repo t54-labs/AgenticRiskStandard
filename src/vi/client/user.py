@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ars_client.requestor import RequestorClient
+from abstract_ars_client.requestor import RequestorClient
 
 from ._models import CredentialTrackResponse
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from nacl.signing import SigningKey
 
-from ars.crypto import sign_envelope
+from abstract_ars.crypto import sign_envelope
 
 
 def pubkey_hex(signing_key: SigningKey) -> str:

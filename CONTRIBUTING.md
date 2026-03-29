@@ -18,8 +18,8 @@ pytest tests/ -v
 
 The project is organized into four packages:
 
-- `src/ars/` — Abstract protocol (models, state machine, crypto, escrow, settlement)
-- `src/ars_client/` — Abstract protocol client SDK
+- `src/abstract_ars/` — Abstract protocol (models, state machine, crypto, escrow, settlement)
+- `src/abstract_ars_client/` — Abstract protocol client SDK
 - `src/ap2/server/` — Concrete AP2 server (mandates, roles, x402, live escrow)
 - `src/ap2/client/` — Concrete AP2 client SDK
 

@@ -31,7 +31,7 @@ async def test_collateral_lock_and_slash():
     lock = await sl.lock_collateral("job-1", 5000, "USD", "payer")
     assert lock.ref == "collateral:job-1"
 
-    slash = await sl.slash_collateral("job-1", "0xTreasury")
+    slash = await sl.slash_collateral("job-1", "user-addr")
     assert "slashed" in slash.ref
 
 
@@ -41,3 +41,10 @@ async def test_collateral_lock_and_unlock():
     await sl.lock_collateral("job-1", 5000, "USD", "payer")
     unlock = await sl.unlock_collateral("job-1")
     assert "collateral_unlocked" in unlock.ref
+
+
+@pytest.mark.asyncio
+async def test_pay_premium():
+    sl = MockSettlementLayer()
+    result = await sl.pay_premium("job-1", 200, "USD", "user", "underwriter")
+    assert "premium:job-1" in result.ref

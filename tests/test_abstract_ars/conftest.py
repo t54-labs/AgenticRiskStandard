@@ -6,13 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
-from ars.crypto import (
+from abstract_ars.crypto import (
     compute_agreement_hash,
     envelope_body,
     sign_envelope,
 )
-from ars.models import EventType
-from ars.server import create_app
+from abstract_ars.models import EventType
+from abstract_ars.server import create_app
 
 
 @pytest.fixture()

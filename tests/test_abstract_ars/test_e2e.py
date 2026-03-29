@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from nacl.signing import SigningKey
 
-from ars.crypto import compute_agreement_hash
-from ars.models import EventType
+from abstract_ars.crypto import compute_agreement_hash
+from abstract_ars.models import EventType
 
 from .conftest import (
     make_agreement_dict,

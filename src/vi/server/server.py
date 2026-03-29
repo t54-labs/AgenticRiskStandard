@@ -8,11 +8,11 @@ from typing import Optional
 
 from fastapi import FastAPI, Request
 
-from ars.crypto import compute_agreement_hash, verify_envelope_signature
-from ars.errors import AuthError, BadRequestError, ConflictError, NotFoundError
-from ars.models import CreateJobRequest, SignedActionEnvelope
-from ars.routes import create_shared_router, make_append_validated, verify_sig
-from ars.store import EventStore
+from abstract_ars.crypto import compute_agreement_hash, verify_envelope_signature
+from abstract_ars.errors import AuthError, BadRequestError, ConflictError, NotFoundError
+from abstract_ars.models import CreateJobRequest, SignedActionEnvelope
+from abstract_ars.routes import create_shared_router, make_append_validated, verify_sig
+from abstract_ars.store import EventStore
 
 from .constraints import VIConstraintEngine
 from .models import (
@@ -206,7 +206,9 @@ def _register_override_routes(application: FastAPI) -> None:
             if action == "release":
                 collateral_result = await sl.unlock_collateral(job_id)
             else:
-                collateral_result = await sl.slash_collateral(job_id, "treasury")
+                collateral_result = await sl.slash_collateral(
+                    job_id, state.agreement.user_pubkey,
+                )
 
         payload = {**envelope.payload, "settlement_ref": result.ref}
         if collateral_result:
@@ -227,6 +229,49 @@ def _register_override_routes(application: FastAPI) -> None:
         if collateral_result:
             resp["collateral_settlement_ref"] = collateral_result.ref
         return resp
+
+    @application.post("/jobs/{job_id}/uw/premium")
+    async def pay_premium(
+        job_id: str, envelope: SignedActionEnvelope, request: Request,
+    ):
+        store = _store(request)
+        if not store.job_exists(job_id):
+            raise NotFoundError(f"Job {job_id} not found")
+        if envelope.type != VIEventType.PREMIUM_PAID.value:
+            raise BadRequestError("Expected type PREMIUM_PAID")
+
+        verify_sig(envelope)
+        envelope = envelope.model_copy(update={"job_id": job_id})
+
+        events = store.get_events(job_id)
+        state = derive_vi_job_state(events)
+        validate_vi_transition(state, envelope)
+
+        assert state.agreement and state.uw_decision
+        premium_amount = int(state.uw_decision.get("premium") or 0)
+
+        sl = _settlement(request)
+        result = await sl.pay_premium(
+            job_id,
+            premium_amount,
+            state.agreement.fee.currency,
+            payer_addr=state.agreement.user_pubkey,
+            payee_addr=state.agreement.underwriter_pubkey or "",
+        )
+
+        payload = {**envelope.payload, "premium_ref": result.ref}
+        envelope = envelope.model_copy(update={"payload": payload})
+        store.append_event(envelope)
+
+        events = store.get_events(job_id)
+        new_state = derive_vi_job_state(events)
+        return {
+            "job_id": job_id,
+            "principal_track_state": new_state.principal_track_state.value
+            if new_state.principal_track_state
+            else None,
+            "premium_ref": result.ref,
+        }
 
     @application.post("/jobs/{job_id}/uw/collateral/lock")
     async def lock_collateral(

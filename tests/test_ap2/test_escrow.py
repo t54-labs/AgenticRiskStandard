@@ -1,68 +1,64 @@
-"""Tests for MockEscrowClient."""
-
-from __future__ import annotations
+"""Tests for FeeEscrow + CollateralVault."""
 
 import pytest
 
-from ap2.server.escrow import DepositStatus, DepositType, MockEscrowClient
+from abstract_ars.vaults import DepositStatus, MockCollateralVault, MockFeeEscrow
 
 
-@pytest.mark.asyncio
-async def test_record_and_release():
-    client = MockEscrowClient()
-    tx = await client.record_deposit("job-1", DepositType.FEE, "payer", "payee", 1000)
-    assert "escrow_tx" in tx
+@pytest.fixture()
+def fee_escrow():
+    return MockFeeEscrow()
 
-    info = await client.get_deposit("job-1", DepositType.FEE)
-    assert info is not None
+
+@pytest.fixture()
+def collateral_vault():
+    return MockCollateralVault()
+
+
+async def test_record_and_release(fee_escrow):
+    tx = await fee_escrow.lock("job-1", "user", "merchant", 5000)
+    assert tx
+
+    info = await fee_escrow.get_status("job-1")
     assert info.status == DepositStatus.LOCKED
-    assert info.amount == 1000
+    assert info.amount == 5000
 
-    release_tx = await client.release("job-1", DepositType.FEE)
-    assert "release_tx" in release_tx
+    release_tx = await fee_escrow.release("job-1")
+    assert release_tx
 
-    info = await client.get_deposit("job-1", DepositType.FEE)
+    info = await fee_escrow.get_status("job-1")
     assert info.status == DepositStatus.RELEASED
 
 
-@pytest.mark.asyncio
-async def test_record_and_refund():
-    client = MockEscrowClient()
-    await client.record_deposit("job-1", DepositType.FEE, "payer", "payee", 500)
-    await client.refund("job-1", DepositType.FEE)
+async def test_record_and_refund(fee_escrow):
+    await fee_escrow.lock("job-1", "user", "merchant", 3000)
+    tx = await fee_escrow.refund("job-1")
+    assert tx
 
-    info = await client.get_deposit("job-1", DepositType.FEE)
+    info = await fee_escrow.get_status("job-1")
     assert info.status == DepositStatus.REFUNDED
 
 
-@pytest.mark.asyncio
-async def test_slash_collateral():
-    client = MockEscrowClient()
-    await client.record_deposit("job-1", DepositType.COLLATERAL, "payer", "", 2000)
-    await client.slash("job-1", "0xTreasury")
+async def test_slash_collateral(collateral_vault):
+    await collateral_vault.lock("job-1", "merchant", 10000)
+    tx = await collateral_vault.slash("job-1", "treasury")
+    assert tx
 
-    info = await client.get_deposit("job-1", DepositType.COLLATERAL)
+    info = await collateral_vault.get_status("job-1")
     assert info.status == DepositStatus.SLASHED
 
 
-@pytest.mark.asyncio
-async def test_double_deposit_raises():
-    client = MockEscrowClient()
-    await client.record_deposit("job-1", DepositType.FEE, "p", "q", 100)
-    with pytest.raises(ValueError, match="Already deposited"):
-        await client.record_deposit("job-1", DepositType.FEE, "p", "q", 100)
+async def test_double_deposit_raises(fee_escrow):
+    await fee_escrow.lock("job-1", "user", "merchant", 5000)
+    with pytest.raises(ValueError):
+        await fee_escrow.lock("job-1", "user", "merchant", 5000)
 
 
-@pytest.mark.asyncio
-async def test_release_non_locked_raises():
-    client = MockEscrowClient()
-    await client.record_deposit("job-1", DepositType.FEE, "p", "q", 100)
-    await client.release("job-1", DepositType.FEE)
-    with pytest.raises(ValueError, match="Cannot release"):
-        await client.release("job-1", DepositType.FEE)
+async def test_release_non_locked_raises(fee_escrow):
+    with pytest.raises(ValueError):
+        await fee_escrow.release("job-999")
 
 
-@pytest.mark.asyncio
-async def test_get_nonexistent_returns_none():
-    client = MockEscrowClient()
-    assert await client.get_deposit("nope", DepositType.FEE) is None
+async def test_get_nonexistent_returns_none(fee_escrow):
+    info = await fee_escrow.get_status("job-999")
+    assert info is None

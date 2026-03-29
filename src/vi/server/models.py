@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from ars.models import EventType, FeeTerms, JobStateView, PrincipalTerms
+from abstract_ars.models import EventType, FeeTerms, JobStateView, PrincipalTerms
 
 
 # ── VI Enums ─────────────────────────────────────────────────────────────────

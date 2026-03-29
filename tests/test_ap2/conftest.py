@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
-from ars.crypto import canonicalize, sign_envelope
+from abstract_ars.crypto import canonicalize, sign_envelope
 
 from ap2.server.server import create_app
 

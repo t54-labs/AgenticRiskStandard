@@ -110,20 +110,20 @@ pip install -e ".[dev]"
 uvicorn ars.server:app --host 0.0.0.0 --port 8000
 
 # Run base tests
-pytest tests/test_ars/ -v
+pytest tests/test_abstract_ars/ -v
 ```
 
 ### Architecture
 
 ```
-src/ars/
+src/abstract_ars/
   models.py      # Pydantic models, enums (JobPhase, EventType, etc.)
   crypto.py      # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
   routes.py      # Shared APIRouter factory (14 endpoints reused by ap2/)
   server.py      # FastAPI app with override endpoints
   state.py       # Event-sourced state derivation + transition validation
   store.py       # SQLite append-only event store
-  escrow.py      # Escrow ABC + MockEscrowClient
+  vaults.py      # FeeEscrow + CollateralVault ABCs + mocks
   settlement.py  # Settlement layer ABC + MockSettlementLayer
   errors.py      # HTTP error hierarchy
 ```
@@ -280,8 +280,8 @@ src/ap2/
     roles.py         # 6-actor RoleRegistry + cryptographic firewall
     constraints.py   # IntentMandate constraint engine (budget, merchant, SKU, TTL)
     x402.py          # x402 payment rail (internal transport)
-    escrow.py        # LiveEscrowClient (web3.py, re-exports from ars.escrow)
-    settlement.py    # LiveSettlementLayer (x402 + escrow, re-exports from ars.settlement)
+    escrow.py        # LiveEscrowClient (web3.py, re-exports from abstract_ars.vaults)
+    settlement.py    # LiveSettlementLayer (x402 + escrow, re-exports from abstract_ars.settlement)
     state.py         # Composite state machine: mandate authorization + base tracks
     server.py        # FastAPI app: shared router + override + mandate endpoints
   client/
@@ -388,7 +388,7 @@ src/vi/
     constraints.py   # VI constraint engine (amount, merchant, payee, line items, budget)
     state.py         # Composite state machine: credential authorization + base tracks
     server.py        # FastAPI app: shared router + override + credential endpoints
-    settlement.py    # Re-exports SettlementLayer from ars.settlement
+    settlement.py    # Re-exports SettlementLayer from abstract_ars.settlement
   client/
     user.py          # VIUserClient (extends RequestorClient with L2 methods)
     agent.py         # VIAgentClient (L3 creation, credential queries)

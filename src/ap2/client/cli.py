@@ -7,9 +7,9 @@ import sys
 
 import click
 
-from ars_client._signing import load_signing_key
-from ars_client._transport import ARSClientError
-from ars_client.cli import cli, _print_json, _handle_error, _get_key
+from abstract_ars_client._signing import load_signing_key
+from abstract_ars_client._transport import ARSClientError
+from abstract_ars_client.cli import cli, _print_json, _handle_error, _get_key
 
 from .merchant import MerchantClient
 from .shopping_agent import ShoppingAgentClient

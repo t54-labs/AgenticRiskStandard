@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
-from ars.crypto import sign_envelope
+from abstract_ars.crypto import sign_envelope
 from vi.server.crypto import generate_es256_keypair, public_key_to_jwk
 from vi.server.server import create_app
 

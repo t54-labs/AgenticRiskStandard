@@ -1,8 +1,8 @@
-"""VI settlement layer tests (MockSettlementLayer from ars.settlement)."""
+"""VI settlement layer tests (MockSettlementLayer from abstract_ars.settlement)."""
 
 import pytest
 
-from ars.settlement import MockSettlementLayer
+from abstract_ars.settlement import MockSettlementLayer
 
 
 @pytest.fixture()
@@ -34,5 +34,10 @@ async def test_collateral_lock_and_unlock(settlement):
 
 async def test_collateral_lock_and_slash(settlement):
     await settlement.lock_collateral("job-1", 10000, "USD", "merchant")
-    slash = await settlement.slash_collateral("job-1", "treasury")
+    slash = await settlement.slash_collateral("job-1", "user-addr")
     assert "slashed" in slash.ref
+
+
+async def test_pay_premium(settlement):
+    result = await settlement.pay_premium("job-1", 200, "USD", "user", "underwriter")
+    assert "premium:job-1" in result.ref

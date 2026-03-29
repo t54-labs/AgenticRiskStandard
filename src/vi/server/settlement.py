@@ -1,6 +1,6 @@
 """VI settlement layer — re-exports from base ARS."""
 
-from ars.settlement import (
+from abstract_ars.settlement import (
     LockResult,
     MockSettlementLayer,
     SettleActionResult,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ars_client._base import BaseClient
+from abstract_ars_client._base import BaseClient
 
 
 class ShoppingAgentClient(BaseClient):

@@ -39,6 +39,7 @@ def verify_envelope_signature(pubkey_hex: str, body: dict, signature_hex: str) -
     """Verify Ed25519 signature. Returns True or raises BadSignatureError."""
     vk = VerifyKey(bytes.fromhex(pubkey_hex))
     canonical = canonicalize(body)
+    # signature hex = canonical + private key
     sig_bytes = bytes.fromhex(signature_hex)
     try:
         vk.verify(canonical, sig_bytes)

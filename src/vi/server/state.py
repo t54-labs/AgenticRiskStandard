@@ -5,15 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ars.errors import BadRequestError, ConflictError
-from ars.models import (
+from abstract_ars.errors import BadRequestError, ConflictError
+from abstract_ars.models import (
     AgreementDraft,
     Event,
     JobPhase,
     JobStateView,
     SignedActionEnvelope,
 )
-from ars.state import derive_job_state, validate_transition
+from abstract_ars.state import derive_job_state, validate_transition
 
 from .models import (
     CredentialTrackState,

@@ -9,9 +9,9 @@ from nacl.signing import SigningKey
 from ap2.server.server import create_app
 from ap2.client.merchant import MerchantClient
 from ap2.client.user import UserClient
-from ars_client._transport import Transport
-from ars_client.evaluator import EvaluatorClient
-from ars_client.underwriter import UnderwriterClient
+from abstract_ars_client._transport import Transport
+from abstract_ars_client.evaluator import EvaluatorClient
+from abstract_ars_client.underwriter import UnderwriterClient
 
 
 @pytest.fixture()

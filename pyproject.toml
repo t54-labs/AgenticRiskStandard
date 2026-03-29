@@ -31,7 +31,7 @@ vi = [
 ]
 
 [project.scripts]
-ars-cli = "ars_client.cli:main"
+ars-cli = "abstract_ars_client.cli:main"
 ap2-cli = "ap2.client.cli:main"
 vi-cli = "vi.client.cli:main"
 
@@ -55,4 +55,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["ars*", "ap2*", "vi*"]
+include = ["abstract_ars*", "ap2*", "vi*"]

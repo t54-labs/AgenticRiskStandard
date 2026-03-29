@@ -2,7 +2,7 @@
 
 import pytest
 
-from ars.errors import BadRequestError, ForbiddenError
+from abstract_ars.errors import BadRequestError, ForbiddenError
 from vi.server.models import VIAgreementDraft
 from vi.server.roles import VIRole, VIRoleRegistry
 

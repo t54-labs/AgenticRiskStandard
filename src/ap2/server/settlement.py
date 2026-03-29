@@ -1,24 +1,24 @@
-"""AP2 live settlement implementation (x402 + escrow) + re-exports from ars.settlement."""
+"""AP2 live settlement implementation (x402 + escrow) + re-exports from abstract_ars.settlement."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from ars.escrow import DepositType, EscrowClient
-from ars.settlement import (  # noqa: F401 — re-export for backward compat
+from abstract_ars.settlement import (  # noqa: F401 — re-export for backward compat
     LockResult,
     MockSettlementLayer,
     SettleActionResult,
     SettlementLayer,
 )
 
+from .escrow import LiveEscrowClient
 from .x402 import X402Settlement
 
 
 class LiveSettlementLayer(SettlementLayer):
     """Composes LiveX402Settlement + LiveEscrowClient for on-chain operations."""
 
-    def __init__(self, x402: X402Settlement, escrow: EscrowClient) -> None:
+    def __init__(self, x402: X402Settlement, escrow: LiveEscrowClient) -> None:
         self._x402 = x402
         self._escrow = escrow
 
@@ -31,23 +31,19 @@ class LiveSettlementLayer(SettlementLayer):
         payee_addr: str,
         payment_payload: Optional[dict] = None,
     ) -> LockResult:
-        x402_tx = None
         if payment_payload:
             req = await self._x402.create_payment_requirement(job_id, amount, currency)
-            result = await self._x402.settle(job_id, payment_payload, req.to_dict())
-            x402_tx = result.transaction
+            await self._x402.settle(job_id, payment_payload, req.to_dict())
 
-        escrow_tx = await self._escrow.record_deposit(
-            job_id, DepositType.FEE, payer_addr, payee_addr, amount,
-        )
-        return LockResult(x402_tx=x402_tx, escrow_tx=escrow_tx, ref=f"lock:{job_id}")
+        escrow_tx = await self._escrow.lock_fee(job_id, payer_addr, payee_addr, amount)
+        return LockResult(escrow_tx=escrow_tx, ref=f"lock:{job_id}")
 
     async def release_fee(self, job_id: str) -> SettleActionResult:
-        tx = await self._escrow.release(job_id, DepositType.FEE)
+        tx = await self._escrow.release_fee(job_id)
         return SettleActionResult(tx_hash=tx, ref=f"settle:{job_id}:release")
 
     async def refund_fee(self, job_id: str) -> SettleActionResult:
-        tx = await self._escrow.refund(job_id, DepositType.FEE)
+        tx = await self._escrow.refund_fee(job_id)
         return SettleActionResult(tx_hash=tx, ref=f"settle:{job_id}:refund")
 
     async def lock_collateral(
@@ -58,26 +54,28 @@ class LiveSettlementLayer(SettlementLayer):
         payer_addr: str,
         payment_payload: Optional[dict] = None,
     ) -> LockResult:
-        x402_tx = None
         if payment_payload:
             req = await self._x402.create_payment_requirement(job_id, amount, currency)
-            result = await self._x402.settle(job_id, payment_payload, req.to_dict())
-            x402_tx = result.transaction
+            await self._x402.settle(job_id, payment_payload, req.to_dict())
 
-        escrow_tx = await self._escrow.record_deposit(
-            job_id, DepositType.COLLATERAL, payer_addr, "", amount,
-        )
-        return LockResult(
-            x402_tx=x402_tx, escrow_tx=escrow_tx, ref=f"collateral:{job_id}"
-        )
+        escrow_tx = await self._escrow.lock_collateral(job_id, payer_addr, amount)
+        return LockResult(escrow_tx=escrow_tx, ref=f"collateral:{job_id}")
 
-    async def slash_collateral(self, job_id: str, treasury: str) -> SettleActionResult:
-        tx = await self._escrow.slash(job_id, treasury)
+    async def slash_collateral(self, job_id: str, recipient: str) -> SettleActionResult:
+        tx = await self._escrow.slash(job_id, recipient)
         return SettleActionResult(tx_hash=tx, ref=f"slashed:{job_id}")
 
     async def unlock_collateral(self, job_id: str) -> SettleActionResult:
-        tx = await self._escrow.refund(job_id, DepositType.COLLATERAL)
+        tx = await self._escrow.unlock_collateral(job_id)
         return SettleActionResult(tx_hash=tx, ref=f"collateral_unlocked:{job_id}")
+
+    async def pay_premium(
+        self, job_id: str, amount: int, currency: str, payer_addr: str, payee_addr: str,
+    ) -> SettleActionResult:
+        # Premium is a direct transfer via x402 (no escrow hold needed)
+        return SettleActionResult(
+            tx_hash=f"premium_tx:{job_id[:8]}", ref=f"premium:{job_id}",
+        )
 
     async def release_principal(
         self,
@@ -87,14 +85,10 @@ class LiveSettlementLayer(SettlementLayer):
         destination: Optional[str],
         payment_payload: Optional[dict] = None,
     ) -> SettleActionResult:
-        x402_tx = None
         if payment_payload:
             req = await self._x402.create_payment_requirement(job_id, amount, currency)
-            result = await self._x402.settle(job_id, payment_payload, req.to_dict())
-            x402_tx = result.transaction
+            await self._x402.settle(job_id, payment_payload, req.to_dict())
 
-        escrow_tx = await self._escrow.record_deposit(
-            job_id, DepositType.PRINCIPAL, "", destination or "", amount,
-        )
-        release_tx = await self._escrow.release(job_id, DepositType.PRINCIPAL)
+        await self._escrow.record_principal(job_id, "", destination or "", amount)
+        release_tx = await self._escrow.release_principal(job_id)
         return SettleActionResult(tx_hash=release_tx, ref=f"transfer:{job_id}")

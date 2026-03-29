@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from ars_client._models import MandateTrackResponse
-from ars_client.business_agent import BusinessAgentClient
+from abstract_ars_client._models import MandateTrackResponse
+from abstract_ars_client.business_agent import BusinessAgentClient
 
 
 class MerchantClient(BusinessAgentClient):

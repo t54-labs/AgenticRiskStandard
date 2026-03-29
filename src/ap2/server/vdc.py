@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from nacl.signing import SigningKey
 
-from ars.crypto import canonicalize, sign_envelope, verify_envelope_signature
+from abstract_ars.crypto import canonicalize, sign_envelope, verify_envelope_signature
 
 from .models import (
     CartLineItem,

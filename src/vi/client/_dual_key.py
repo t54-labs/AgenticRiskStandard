@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.serialization import (
     load_pem_private_key,
 )
 
-from ars_client._base import BaseClient
+from abstract_ars_client._base import BaseClient
 from vi.server.crypto import (
     generate_es256_keypair,
     private_key_to_jwk,

@@ -210,26 +210,8 @@ def create_shared_router(
             "approve": envelope.payload["approve"],
         }
 
-    @router.post("/jobs/{job_id}/uw/premium")
-    async def pay_premium(
-        job_id: str, envelope: SignedActionEnvelope, request: Request,
-    ):
-        store = get_store(request)
-        if not store.job_exists(job_id):
-            raise NotFoundError(f"Job {job_id} not found")
-
-        premium_ref = envelope.payload.get("premium_ref")
-        if not premium_ref:
-            raise BadRequestError("payload.premium_ref is required")
-
-        new_state = _append(store, job_id, envelope, event_types["PREMIUM_PAID"],)
-        return {
-            "job_id": job_id,
-            "principal_track_state": new_state.principal_track_state.value
-            if new_state.principal_track_state
-            else None,
-            "premium_ref": premium_ref,
-        }
+    # NOTE: POST /jobs/{id}/uw/premium is an override route in server.py
+    # (calls settlement.pay_premium for actual fund transfer)
 
     @router.post("/jobs/{job_id}/uw/premium/refuse")
     async def refuse_premium(

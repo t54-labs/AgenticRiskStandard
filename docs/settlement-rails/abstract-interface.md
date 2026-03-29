@@ -1,6 +1,6 @@
 # Abstract Settlement Interface
 
-The settlement abstractions live in `src/ars/escrow.py` and `src/ars/settlement.py`. They define the contract that any concrete implementation must fulfill.
+The settlement abstractions live in `src/abstract_ars/vaults.py` and `src/abstract_ars/settlement.py`. They define the contract that any concrete implementation must fulfill.
 
 ## EscrowClient ABC
 
@@ -64,7 +64,6 @@ Note that `unlock_collateral` and `slash_collateral` are called automatically by
 ```python
 @dataclass
 class LockResult:
-    x402_tx: Optional[str]   # Payment rail transaction (if any)
     escrow_tx: str            # Escrow record transaction
     ref: str                  # Reference for tracking (e.g., "lock:job-123")
 

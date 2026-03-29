@@ -18,14 +18,14 @@ import json
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
-from ars_client._transport import Transport
+from abstract_ars_client._transport import Transport
 from vi.client.user import VIUserClient
 from vi.client.agent import VIAgentClient
 from vi.client.merchant import VIMerchantClient
 from vi.client.credential_provider import VICredentialProviderClient
 from vi.client.payment_network import VIPaymentNetworkClient
-from ars_client.evaluator import EvaluatorClient
-from ars_client.underwriter import UnderwriterClient
+from abstract_ars_client.evaluator import EvaluatorClient
+from abstract_ars_client.underwriter import UnderwriterClient
 from vi.server.server import create_app
 from vi.server.crypto import generate_es256_keypair, public_key_to_jwk
 

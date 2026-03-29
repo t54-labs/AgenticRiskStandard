@@ -6,7 +6,7 @@ import os
 
 from nacl.signing import SigningKey
 
-from ars_client.evaluator import EvaluatorClient
+from abstract_ars_client.evaluator import EvaluatorClient
 
 SERVER = os.environ.get("ARS_SERVER_URL", "http://127.0.0.1:8000")
 STATE_FILE = "state.json"

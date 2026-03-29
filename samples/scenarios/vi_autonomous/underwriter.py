@@ -9,7 +9,7 @@ import sys
 
 from nacl.signing import SigningKey
 
-from ars_client.underwriter import UnderwriterClient
+from abstract_ars_client.underwriter import UnderwriterClient
 
 SERVER = os.environ.get("ARS_SERVER_URL", "http://127.0.0.1:8000")
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")

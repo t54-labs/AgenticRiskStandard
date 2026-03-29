@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ars_client.business_agent import BusinessAgentClient
+from abstract_ars_client.business_agent import BusinessAgentClient
 
 from ._models import SelectivePresentationResponse
 

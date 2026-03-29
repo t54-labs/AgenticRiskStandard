@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from ars.errors import BadRequestError, ForbiddenError
+from abstract_ars.errors import BadRequestError, ForbiddenError
 
 from .models import VIAgreementDraft
 

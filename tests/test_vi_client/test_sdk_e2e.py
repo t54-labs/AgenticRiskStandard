@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from nacl.signing import SigningKey
 
-from ars_client._transport import Transport
-from ars_client.evaluator import EvaluatorClient
-from ars_client.underwriter import UnderwriterClient
+from abstract_ars_client._transport import Transport
+from abstract_ars_client.evaluator import EvaluatorClient
+from abstract_ars_client.underwriter import UnderwriterClient
 from vi.client.agent import VIAgentClient
 from vi.client.credential_provider import VICredentialProviderClient
 from vi.client.merchant import VIMerchantClient
