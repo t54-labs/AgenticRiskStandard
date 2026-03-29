@@ -27,7 +27,7 @@ The settlement action must match the evaluation verdict. A `pass` verdict requir
 
 ## Automatic Collateral Handling
 
-When collateral is locked (via the principal track), fee settlement automatically handles it. There is no separate collateral settlement step. On `release` (pass verdict), the server unlocks collateral and returns it to the business agent. On `refund` (fail verdict), the server slashes collateral to a protocol treasury. This ensures collateral is always resolved alongside the fee, preventing orphaned deposits.
+When collateral is locked (via the principal track), fee settlement automatically handles it. There is no separate collateral settlement step. On `release` (pass verdict), the server unlocks collateral and returns it to the business agent. On `refund` (fail verdict), the server slashes collateral to the requestor (the harmed party). This ensures collateral is always resolved alongside the fee, preventing orphaned deposits.
 
 ## Ordering Constraints
 

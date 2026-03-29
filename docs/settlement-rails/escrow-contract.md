@@ -14,7 +14,7 @@ The x402 payment rail can transfer USDC between wallets, but it cannot hold fund
 
 **refund(jobId, type)** returns the deposited USDC to the payer. Used when a deliverable fails evaluation or when collateral is unlocked after successful delivery.
 
-**slash(jobId, treasury)** seizes collateral and sends it to a protocol treasury address. Used when the business agent fails to deliver after posting collateral. Only applies to COLLATERAL deposits.
+**slash(jobId, recipient)** seizes collateral and sends it to the recipient (typically the requestor, the harmed party). Used when the business agent fails to deliver after posting collateral. Only applies to COLLATERAL deposits.
 
 **getDeposit(jobId, type)** is a read-only query that returns the current status of a deposit (payer, payee, amount, status).
 
@@ -25,7 +25,7 @@ The x402 payment rail can transfer USDC between wallets, but it cannot hold fund
                                                  ↓
                                     release → RELEASED (to payee)
                                     refund  → REFUNDED (to payer)
-                                    slash   → SLASHED  (to treasury)
+                                    slash   → SLASHED  (to recipient)
 ```
 
 Each deposit can only transition once from LOCKED. Attempting to release an already-released deposit will revert.
@@ -34,18 +34,24 @@ Each deposit can only transition once from LOCKED. Attempting to release an alre
 
 The contract uses an OPERATOR_ROLE for access control. Only the operator (the ARS server's signing key) can call `recordDeposit`, `release`, `refund`, and `slash`. This prevents unauthorized parties from manipulating deposits.
 
-## LiveEscrowClient
+## LiveFeeEscrow and LiveCollateralVault
 
-The Python interface to the contract is `LiveEscrowClient` in `src/ap2/server/escrow.py`. It uses web3.py to build and send transactions:
+The Python interface to the contract is split into `LiveFeeEscrow` and `LiveCollateralVault` in `src/ap2/server/vaults.py`. Both extend the abstract ABCs from `abstract_ars/vaults.py` and share a common `_LiveEscrowBase` for web3.py setup:
 
 ```python
-escrow = LiveEscrowClient(
+from ap2.server.vaults import LiveFeeEscrow, LiveCollateralVault
+
+contract_args = dict(
     rpc_url="https://mainnet.base.org",
     contract_address="<deployed-address>",
     abi=abi,
     operator_key="<operator-private-key>",
 )
+fee_escrow = LiveFeeEscrow(**contract_args)
+collateral_vault = LiveCollateralVault(**contract_args)
 ```
+
+`LiveFeeEscrow` maps `lock/release/refund` to the contract's `recordDeposit/release/refund` with `DepositType.FEE`. `LiveCollateralVault` maps `lock/unlock/slash` to the same contract functions with `DepositType.COLLATERAL`.
 
 The client encodes job IDs as `keccak256(job_id_string)` for the contract's bytes32 parameter. All methods are async (though the underlying web3 calls are synchronous, wrapped for API consistency).
 

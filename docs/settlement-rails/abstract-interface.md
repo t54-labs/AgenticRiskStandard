@@ -2,37 +2,39 @@
 
 The settlement abstractions live in `src/abstract_ars/vaults.py` and `src/abstract_ars/settlement.py`. They define the contract that any concrete implementation must fulfill.
 
-## EscrowClient ABC
+## Vault ABCs
 
-`EscrowClient` is the base escrow abstraction. All methods are async.
+Two separate vault abstractions handle the two types of conditional fund-holding. All methods are async.
+
+### FeeEscrow
+
+Holds fee funds in trust. Released to the payee (merchant) on pass, refunded to the payer (requestor) on fail.
 
 ```python
-class EscrowClient(ABC):
-    async def record_deposit(self, job_id, deposit_type, payer, payee, amount) -> str
-    async def release(self, job_id, deposit_type) -> str
-    async def refund(self, job_id, deposit_type) -> str
-    async def slash(self, job_id, treasury) -> str
-    async def get_deposit(self, job_id, deposit_type) -> Optional[DepositInfo]
+class FeeEscrow(ABC):
+    async def lock(self, job_id, payer, payee, amount) -> str
+    async def release(self, job_id) -> str
+    async def refund(self, job_id) -> str
+    async def get_status(self, job_id) -> Optional[DepositInfo]
 ```
 
-**record_deposit** tags a deposit after funds have been transferred. It takes the job ID, deposit type (FEE, COLLATERAL, or PRINCIPAL), payer address, payee address, and amount. Returns a transaction hash or reference.
+### CollateralVault
 
-**release** sends funds from the deposit to the payee. Used when a deliverable passes evaluation (fee) or when principal becomes releasable.
-
-**refund** returns funds to the payer. Used when a deliverable fails evaluation.
-
-**slash** seizes collateral and sends it to a treasury address. Used when the business agent fails to deliver after locking collateral.
-
-**get_deposit** queries the current status of a deposit (LOCKED, RELEASED, REFUNDED, or SLASHED).
-
-## Deposit Types and Statuses
+Holds a delivery guarantee bond from the merchant. Returned on successful delivery, slashed to the harmed party (requestor) on failure.
 
 ```python
-class DepositType(IntEnum):
-    FEE = 0
-    COLLATERAL = 1
-    PRINCIPAL = 2
+class CollateralVault(ABC):
+    async def lock(self, job_id, payer, amount) -> str
+    async def unlock(self, job_id) -> str
+    async def slash(self, job_id, recipient) -> str
+    async def get_status(self, job_id) -> Optional[DepositInfo]
+```
 
+Note that collateral `slash` sends funds to `recipient` — the requestor (the harmed party who didn't receive goods), not a generic treasury.
+
+## Deposit Status
+
+```python
 class DepositStatus(IntEnum):
     LOCKED = 0
     RELEASED = 1
@@ -42,22 +44,31 @@ class DepositStatus(IntEnum):
 
 ## SettlementLayer ABC
 
-`SettlementLayer` composes escrow operations into the seven operations the server needs:
+`SettlementLayer` composes vault operations plus premium and principal transfers into the eight operations the server needs:
 
 ```python
 class SettlementLayer(ABC):
+    # Fee escrow
     async def lock_fee(self, job_id, amount, currency, payer_addr, payee_addr, payment_payload=None) -> LockResult
     async def release_fee(self, job_id) -> SettleActionResult
     async def refund_fee(self, job_id) -> SettleActionResult
+    # Collateral vault
     async def lock_collateral(self, job_id, amount, currency, payer_addr, payment_payload=None) -> LockResult
-    async def slash_collateral(self, job_id, treasury) -> SettleActionResult
+    async def slash_collateral(self, job_id, recipient) -> SettleActionResult
     async def unlock_collateral(self, job_id) -> SettleActionResult
+    # Premium (direct transfer from requestor to underwriter)
+    async def pay_premium(self, job_id, amount, currency, payer_addr, payee_addr) -> SettleActionResult
+    # Principal (direct transfer, not escrowed)
     async def release_principal(self, job_id, amount, currency, destination, payment_payload=None) -> SettleActionResult
 ```
 
 The optional `payment_payload` parameter allows live implementations to include rail-specific transfer data (e.g., an x402 payment authorization). Mock implementations ignore it.
 
-Note that `unlock_collateral` and `slash_collateral` are called automatically by the server during fee settlement. When the fee is settled with `release` (pass verdict), the server calls `unlock_collateral` to return funds to the business agent. When settled with `refund` (fail verdict), the server calls `slash_collateral` to seize funds to a treasury. No client action is required for collateral resolution.
+**Automatic collateral handling:** `unlock_collateral` and `slash_collateral` are called automatically by the server during fee settlement. When the fee is settled with `release` (pass verdict), the server calls `unlock_collateral` to return funds to the merchant. When settled with `refund` (fail verdict), the server calls `slash_collateral` to send funds to the requestor. No client action is required for collateral resolution.
+
+**Premium** is a direct transfer from the requestor to the underwriter. It does not go through a vault — there is no hold period or conditional release.
+
+**Principal** is a direct transfer to the destination account. It does not go through a vault — once conditions are met (coverage satisfied or override accepted), the funds are transferred immediately.
 
 ## Result Types
 
@@ -73,10 +84,8 @@ class SettleActionResult:
     ref: str                  # Reference (e.g., "settle:job-123:release")
 ```
 
-## MockEscrowClient
+## Mock Implementations
 
-The mock implementation stores deposits in an in-memory dict keyed by `"{job_id}:{deposit_type.name}"`. It enforces basic invariants (no double deposits, can only release/refund LOCKED deposits) and returns deterministic references for testing.
+`MockFeeEscrow` and `MockCollateralVault` store deposits in in-memory dicts keyed by job ID. They enforce basic invariants (no double deposits, can only release/refund LOCKED deposits) and return deterministic references for testing.
 
-## MockSettlementLayer
-
-The mock settlement layer composes `MockEscrowClient` and skips payment rail transfers. It produces deterministic `lock_ref`, `settlement_ref`, `collateral_ref`, and `transfer_ref` values that tests can assert against.
+`MockSettlementLayer` composes `MockFeeEscrow` + `MockCollateralVault` and skips payment rail transfers. It produces deterministic `lock_ref`, `settlement_ref`, `collateral_ref`, `premium_ref`, and `transfer_ref` values that tests can assert against.

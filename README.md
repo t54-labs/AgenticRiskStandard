@@ -2,7 +2,7 @@
 
 A settlement-layer protocol for trustworthy AI agent services. ARS provides cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks.
 
-**ARS is designed as an abstract protocol with pluggable concrete implementations.** The `ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
+**ARS is designed as an abstract protocol with pluggable concrete implementations.** The `abstract_ars/` package defines the protocol primitives — models, state machine, event store, and cryptographic signing. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
 
 This repo ships with two concrete implementations:
 - **`ap2/server/`** — realizes ARS using Google's AP2 (Agent Payments Protocol) with x402 on-chain USDC settlement and an escrow smart contract
@@ -12,22 +12,22 @@ This repo ships with two concrete implementations:
 
 ```
 src/
-  ars/              Abstract protocol layer (models, state machine, crypto, event store)
-  ars_client/       Abstract client SDK (RequestorClient, BusinessAgentClient, ...)
+  abstract_ars/           Abstract protocol layer (models, state machine, crypto, event store)
+  abstract_ars_client/    Abstract client SDK (RequestorClient, BusinessAgentClient, ...)
   ap2/
-    server/         Concrete AP2 server (mandates, roles, x402, escrow)
-    client/         Concrete AP2 client SDK (UserClient, MerchantClient, ...)
+    server/               Concrete AP2 server (mandates, roles, x402, escrow)
+    client/               Concrete AP2 client SDK (UserClient, MerchantClient, ...)
   vi/
-    server/         Concrete VI server (SD-JWT credentials, roles, selective disclosure)
-    client/         Concrete VI client SDK (VIUserClient, VIAgentClient, ...)
+    server/               Concrete VI server (SD-JWT credentials, roles, selective disclosure)
+    client/               Concrete VI client SDK (VIUserClient, VIAgentClient, ...)
 ```
 
-`ap2/server/` extends `ars/` through proper inheritance:
-- Uses `ars.models.SignedActionEnvelope` and `ars.models.Event` directly (no reimplementation)
-- `AP2JobStateView` inherits from `ars.models.JobStateView`, adding mandate track fields
+`ap2/server/` extends `abstract_ars/` through proper inheritance:
+- Uses `abstract_ars.models.SignedActionEnvelope` and `abstract_ars.models.Event` directly (no reimplementation)
+- `AP2JobStateView` inherits from `abstract_ars.models.JobStateView`, adding mandate track fields
 - `AP2EventType` is dynamically composed from base `EventType` + AP2-specific events (no duplication)
-- Uses `ars.store.EventStore` directly for event persistence
-- Calls `ars.state.derive_job_state()` and `ars.state.validate_transition()` for base fee/principal tracks
+- Uses `abstract_ars.store.EventStore` directly for event persistence
+- Calls `abstract_ars.state.derive_job_state()` and `abstract_ars.state.validate_transition()` for base fee/principal tracks
 - Mandate track provides structured user intent verification (authorization layer) that feeds into the base fee/principal tracks for actual settlement
 
 ## Overview
@@ -41,7 +41,7 @@ When a human (or organization) delegates a task to an AI agent, both sides need 
 
 ---
 
-## ars/ — Abstract Protocol
+## abstract_ars/ — Abstract Protocol
 
 ### Roles
 
@@ -106,8 +106,8 @@ UW_AWAIT_REQUEST ──> UW_REVIEW ──> [PREMIUM_PENDING] ──> [COLLATERAL
 # Install
 pip install -e ".[dev]"
 
-# Run the abstract ARS server (mock vaults)
-uvicorn ars.server:app --host 0.0.0.0 --port 8000
+# Run the abstract ARS server (mock settlement)
+uvicorn abstract_ars.server:app --host 0.0.0.0 --port 8000
 
 # Run base tests
 pytest tests/test_abstract_ars/ -v
@@ -132,13 +132,13 @@ src/abstract_ars/
 
 **State machine**: `validate_transition()` enforces that each action is only allowed in the correct phase/state and by the correct role. Invalid transitions return `409 Conflict`; unauthorized actors get `403 Forbidden`.
 
-**Mock vaults**: The abstract implementation uses in-memory mock vaults (`MockEscrowVault`, `MockCollateralVault`, `MockPrincipalVault`). Concrete implementations replace these with real settlement — see `ap2/server/` below.
+**Mock settlement**: The abstract implementation uses in-memory mocks (`MockFeeEscrow`, `MockCollateralVault` in `vaults.py`, composed by `MockSettlementLayer`). Concrete implementations replace these with real settlement — see `ap2/server/` below.
 
 ---
 
 ## ap2/server/ — Concrete AP2 Implementation
 
-`ap2/server/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `ars/` primitives and adds three layers:
+`ap2/server/` is a concrete realization of ARS using Google's Agent Payments Protocol (AP2). It inherits the abstract `abstract_ars/` primitives and adds three layers:
 
 ### 1. AP2 Mandates (Authorization Layer)
 
@@ -189,7 +189,7 @@ Fee/Principal Tracks ──> x402 (payment rail) ──> ARSEscrow.sol (hold/rel
 | `recordDeposit(jobId, type, payer, payee, amount)` | Tags a deposit after x402 transfer |
 | `release(jobId, type)` | Sends USDC to payee (merchant) |
 | `refund(jobId, type)` | Returns USDC to payer (user) |
-| `slash(jobId, treasury)` | Seizes collateral to protocol treasury |
+| `slash(jobId, recipient)` | Seizes collateral to recipient (the harmed party) |
 
 ### Dual Modality
 
@@ -299,7 +299,7 @@ src/ap2/
 
 ## vi/server/ — Concrete VI Implementation
 
-`vi/server/` is a concrete realization of ARS using Mastercard's Verifiable Intent (VI) specification. It inherits the abstract `ars/` primitives and adds three layers:
+`vi/server/` is a concrete realization of ARS using Mastercard's Verifiable Intent (VI) specification. It inherits the abstract `abstract_ars/` primitives and adds three layers:
 
 ### 1. SD-JWT Credential Chain (Authorization Layer)
 
@@ -408,7 +408,7 @@ src/vi/
 
 To build a new realization of ARS (e.g., using a different payment rail or blockchain):
 
-1. **Import from `ars/`**: Use `SignedActionEnvelope`, `Event`, `EventStore`, `JobStateView`, `derive_job_state()`, `validate_transition()` directly
+1. **Import from `abstract_ars/`**: Use `SignedActionEnvelope`, `Event`, `EventStore`, `JobStateView`, `derive_job_state()`, `validate_transition()` directly
 2. **Define your agreement model**: Map your domain's actors to ARS roles via a bridging function (see `ap2/server/state.py:_to_base_agreement()`)
 3. **Extend `JobStateView`**: Add fields for your protocol-specific state
 4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `ap2/server/settlement.py`)
@@ -553,7 +553,7 @@ All subsequent endpoints accept a `SignedActionEnvelope`:
 
 In `ap2/server/`, the fee lock uses the **cart total** from the completed mandate as the escrow amount, with the **merchant** as payee. The fee lock and UW request are gated on mandate completion (`PAYMENT_SIGNED`).
 
-Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`. When collateral is locked, fee settlement automatically handles it: `release` unlocks collateral (returned to business agent), `refund` slashes collateral (seized to treasury).
+Settlement rules: `pass` verdict requires `release` action; `fail` verdict requires `refund`. When collateral is locked, fee settlement automatically handles it: `release` unlocks collateral (returned to business agent), `refund` slashes collateral (seized to the requestor as the harmed party).
 
 ### Principal Track Endpoints (fund-moving jobs)
 

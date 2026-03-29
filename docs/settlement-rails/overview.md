@@ -1,6 +1,6 @@
 # Settlement Rails Overview
 
-ARS is designed to be rail-agnostic. The protocol defines abstract interfaces for escrow and settlement operations, and any payment rail can implement them. The fee and principal tracks operate against these abstractions without knowledge of how funds actually move.
+ARS is designed to be rail-agnostic. The protocol defines abstract interfaces for vaults and settlement operations, and any payment rail can implement them. The fee and principal tracks operate against these abstractions without knowledge of how funds actually move.
 
 ## Design Philosophy
 
@@ -12,23 +12,24 @@ This separation means a single ARS deployment can switch payment rails without c
 
 The settlement stack has two layers:
 
-**EscrowClient** is the lower layer. It provides primitive deposit operations: record a deposit, release funds to the payee, refund funds to the payer, slash collateral to a treasury, and query deposit status. Each deposit is tagged by job ID and type (fee, collateral, or principal).
+**Vaults** are the lower layer. Two separate abstractions handle two types of conditional fund-holding: `FeeEscrow` holds service fees in trust (released on pass, refunded on fail), and `CollateralVault` holds delivery guarantee bonds (returned on success, slashed to the requestor on failure).
 
-**SettlementLayer** is the higher layer. It composes escrow operations with optional payment rail transfers. It provides the seven operations that the server calls: `lock_fee`, `release_fee`, `refund_fee`, `lock_collateral`, `slash_collateral`, `unlock_collateral`, and `release_principal`.
+**SettlementLayer** is the higher layer. It composes vault operations with optional payment rail transfers and adds direct transfer operations for premium and principal. It provides the eight operations that the server calls: `lock_fee`, `release_fee`, `refund_fee`, `lock_collateral`, `slash_collateral`, `unlock_collateral`, `pay_premium`, and `release_principal`.
 
-The abstract ARS server programs entirely against `SettlementLayer`. Concrete implementations provide live versions that compose a specific payment rail with an escrow backend.
+The abstract ARS server programs entirely against `SettlementLayer`. Concrete implementations provide live versions that compose a specific payment rail with vault backends.
 
 ## Mock Implementations
 
-For development and testing, ARS provides `MockEscrowClient` (in-memory deposit tracking) and `MockSettlementLayer` (composes the mock escrow with deterministic references). These are used by the test suite and by default when starting a server without a live settlement layer.
+For development and testing, ARS provides `MockFeeEscrow` and `MockCollateralVault` (in-memory deposit tracking) and `MockSettlementLayer` (composes the mock vaults with deterministic references). These are used by the test suite and by default when starting a server without a live settlement layer.
 
 ## Implementing a New Rail
 
 To integrate a new payment rail with ARS:
 
-1. Implement `EscrowClient` for your escrow mechanism (database, smart contract, custodial service).
-2. Optionally implement a payment rail transfer layer (for moving funds between wallets).
-3. Implement `SettlementLayer` by composing your escrow client with your transfer layer.
-4. Pass the live settlement layer to `create_app(settlement=your_layer)`.
+1. Implement `FeeEscrow` for your fee escrow mechanism (database, smart contract, card authorization).
+2. Implement `CollateralVault` for your collateral mechanism.
+3. Optionally implement a payment rail transfer layer (for moving funds between wallets).
+4. Implement `SettlementLayer` by composing your vaults with your transfer layer.
+5. Pass the live settlement layer to `create_app(settlement=your_layer)`.
 
 See [Abstract Interface](abstract-interface.md) for the method signatures and [x402](x402.md) for the reference implementation.

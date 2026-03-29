@@ -11,7 +11,7 @@ pip install -e ".[dev,client]"
 ## Run
 
 ```bash
-cd samples/scenarios/human_present
+cd samples/scenarios/ap2_human_present
 bash run.sh
 ```
 

@@ -10,7 +10,7 @@ ARS provides two parallel settlement tracks that can operate independently or to
 
 The **fee track** handles the primary transaction. A fee is locked in escrow at the start of work, an independent evaluator assesses delivery quality, and the fee is released to the counterparty on pass or refunded to the payer on fail. Every job uses the fee track.
 
-The **principal track** adds underwriting protection for higher-value or higher-risk transactions. An underwriter assesses risk and may require a premium (insurance cost paid by the requestor) and collateral (locked by the business agent as a delivery guarantee). If the business agent fails to deliver, the collateral can be slashed to a treasury. The principal track is optional and activates only for fund-moving jobs.
+The **principal track** adds underwriting protection for higher-value or higher-risk transactions. An underwriter assesses risk and may require a premium (insurance cost paid by the requestor) and collateral (locked by the business agent as a delivery guarantee). If the business agent fails to deliver, the collateral is slashed to the requestor as compensation. The principal track is optional and activates only for fund-moving jobs.
 
 ## Roles
 
@@ -34,7 +34,7 @@ This design has several advantages. The event log is a complete audit trail. Sta
 
 ## Abstract Protocol
 
-ARS is designed as an abstract protocol with pluggable concrete implementations. The `ars/` package defines the protocol primitives: data models, state machine, cryptographic signing, event store, and escrow/settlement abstractions. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
+ARS is designed as an abstract protocol with pluggable concrete implementations. The `abstract_ars/` package defines the protocol primitives: data models, state machine, cryptographic signing, event store, and vault/settlement abstractions. Concrete implementations inherit from these primitives and supply real settlement rails, payment protocols, and role models.
 
 Two concrete implementations are provided:
 - **AP2-ARS** realizes ARS using Google's Agent Payments Protocol (AP2) with Ed25519-signed VDC mandates and x402 on-chain USDC settlement. See [AP2 Integration](../ap2-integration/overview.md).
