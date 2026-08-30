@@ -6,17 +6,32 @@ The principal track adds underwriting protection for high-value or high-risk tra
 
 The principal track has more states than the fee track because it involves multi-party negotiation around risk terms:
 
-```
-Happy path:
-  UW_AWAIT_REQUEST → UW_REVIEW → [PREMIUM_PENDING] → [COLLATERAL_REQUESTED]
-                                                          ↓
-                                                      RELEASABLE (auto)
-                                                          ↓
-                                            EXECUTION_PENDING → EXECUTION_EVIDENCE_SUBMITTED
+```mermaid
+stateDiagram-v2
+    [*] --> UW_AWAIT_REQUEST: agreement bound
+    UW_AWAIT_REQUEST --> UW_REVIEW: agent requests UW
 
-Override path (refused terms):
-  ... → OVERRIDE_PENDING → OVERRIDE_DECIDED → RELEASABLE → ...
+    UW_REVIEW --> PREMIUM_PENDING: approved, premium required
+    UW_REVIEW --> COLLATERAL_REQUESTED: approved, collateral only
+    UW_REVIEW --> RELEASABLE: approved, no terms
+    UW_REVIEW --> OVERRIDE_PENDING: rejected
+
+    PREMIUM_PENDING --> COLLATERAL_REQUESTED: premium paid, collateral required
+    PREMIUM_PENDING --> RELEASABLE: premium paid, no collateral
+    PREMIUM_PENDING --> OVERRIDE_PENDING: premium refused
+
+    COLLATERAL_REQUESTED --> RELEASABLE: collateral locked
+    COLLATERAL_REQUESTED --> OVERRIDE_PENDING: collateral refused
+
+    OVERRIDE_PENDING --> RELEASABLE: requestor overrides (proceed)
+
+    RELEASABLE --> EXECUTION_PENDING: settlement layer releases principal
+    EXECUTION_PENDING --> EXECUTION_EVIDENCE_SUBMITTED: agent submits evidence
+    EXECUTION_EVIDENCE_SUBMITTED --> [*]
 ```
+
+`RELEASABLE` is always reached automatically -- either because coverage terms were satisfied or
+because the requestor's override supplied the authorization. There is no separate approval step.
 
 Several states are conditional. `PREMIUM_PENDING` only appears if the underwriter requires a premium. `COLLATERAL_REQUESTED` only appears if the underwriter requires collateral.
 

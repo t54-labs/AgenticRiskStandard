@@ -67,55 +67,109 @@ Two enforcement gates connect the credential layer to the settlement layer:
 
 ### Immediate Mode
 
-```
-User creates job → User + Merchant sign agreement
-                           ↓
-CredProvider: L1 → User: L2 (final values) → Network: verify L2
-                           ↓
-                    L2_VERIFIED (credential complete)
-                           ↓
-User: lock fee → Merchant: deliver → Evaluator: pass/fail
-                           ↓
-User: settle fee → CLOSED (release to merchant or refund to user)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant CP as Credential Provider
+    participant PN as Payment Network
+    participant M as Merchant
+    participant S as ARS Server
+    actor E as Evaluator
+
+    U->>S: create job (7 actors, mode = immediate, ES256 JWKs)
+    U->>S: AGREEMENT_SIGNED
+    M->>S: AGREEMENT_SIGNED
+    Note over S: phase = TRANSACTION
+
+    rect rgb(238, 243, 252)
+        Note over CP,PN: Authorization — credential track
+        CP->>S: L1 issuer credential (binds user ES256 key)
+        U->>S: L2 user mandate (final checkout + payment values)
+        PN->>S: verify L2 (L1 signature, sd_hash binding, expiry)
+        Note over S: credential track = L2_VERIFIED
+    end
+
+    rect rgb(240, 248, 240)
+        Note over U,E: Settlement — fee track
+        U->>S: lock fee (payee = merchant)
+        M->>S: deliver goods
+        E->>S: verdict pass / fail
+        U->>S: settle fee
+        Note over S: pass → release to merchant<br/>fail → refund to user<br/>phase = CLOSED
+    end
 ```
 
 ### Autonomous Mode
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant CP as Credential Provider
+    participant A as Agent
+    participant PN as Payment Network
+    participant M as Merchant
+    participant S as ARS Server
+    actor E as Evaluator
+
+    U->>S: create job (7 actors, mode = autonomous, ES256 JWKs)
+    U->>S: AGREEMENT_SIGNED
+    M->>S: AGREEMENT_SIGNED
+    Note over S: firewall check:<br/>agent key ≠ credential provider / payment network
+
+    rect rgb(238, 243, 252)
+        Note over CP,PN: Authorization — credential track
+        CP->>S: L1 issuer credential
+        U->>S: L2 user mandate (constraints + cnf.jwk delegating to agent)
+        PN->>S: verify L2
+        par agent fulfilment
+            A->>S: L3a payment fulfilment (5 min TTL)
+        and
+            A->>S: L3b checkout fulfilment (5 min TTL)
+        end
+        PN->>S: verify chain L1 → L2 → L3a + L3b (+ constraint check)
+        Note over S: credential track = L3_CHAIN_VERIFIED
+    end
+
+    rect rgb(240, 248, 240)
+        Note over U,E: Settlement — fee track
+        U->>S: lock fee (payee = merchant)
+        M->>S: deliver goods
+        E->>S: verdict pass / fail
+        U->>S: settle fee
+        Note over S: phase = CLOSED
+    end
 ```
-User creates job → User + Merchant sign agreement
-                           ↓
-CredProvider: L1 → User: L2 (constraints, delegate to agent)
-                           ↓
-                    Network: verify L2
-                           ↓
-              ┌────────────┴────────────┐
-              ↓                         ↓
-    Agent: L3a (payment)      Agent: L3b (checkout)
-              └────────────┬────────────┘
-                           ↓
-              Network: verify chain (+ constraint check)
-                           ↓
-                    L3_CHAIN_VERIFIED (credential complete)
-                           ↓
-User: lock fee → Merchant: deliver → Evaluator: pass/fail
-                           ↓
-User: settle fee → CLOSED
-```
+
+Selective disclosure applies to the presentations, not to the chain itself: the merchant is served
+`GET /jobs/{id}/credentials/present/merchant` (checkout data only) and the payment network is served
+`GET /jobs/{id}/credentials/present/network` (payment data only).
 
 ### With Principal Track
 
-```
-                    CREDENTIAL COMPLETE
-                           ↓
-              ┌────────────┴────────────┐
-              ↓                         ↓
-    User: lock fee              Merchant: request UW
-              ↓                         ↓
-    Merchant: deliver          UW: decide (premium, collateral)
-              ↓                         ↓
-    Evaluator: verdict         User: pay premium / Merchant: lock collateral
-              ↓                         ↓
-    User: settle fee           Auto-RELEASABLE → principal release
-              ↓                         ↓
-           CLOSED              Collateral auto-handled at fee settlement
+```mermaid
+flowchart TD
+    CC([Credential chain verified<br/>L2_VERIFIED or L3_CHAIN_VERIFIED])
+    CC --> F1[User: lock fee]
+    CC --> P1[Merchant: request UW]
+
+    subgraph fee [Fee track]
+        direction TB
+        F1 --> F2[Merchant: deliver goods]
+        F2 --> F3[Evaluator: pass / fail verdict]
+        F3 --> F4[User: settle fee]
+        F4 --> F5([CLOSED])
+    end
+
+    subgraph principal [Principal track]
+        direction TB
+        P1 --> P2[Underwriter: decide premium + collateral]
+        P2 --> P3[User: pay premium<br/>Merchant: lock collateral]
+        P3 --> P4([RELEASABLE — automatic])
+        P4 --> P5[Settlement layer: release principal]
+        P5 --> P6[Merchant: submit execution evidence]
+    end
+
+    F4 -. collateral resolved in the same operation<br/>release → unlock, refund → slash .-> P3
 ```
