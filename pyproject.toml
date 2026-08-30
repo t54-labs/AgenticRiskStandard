@@ -36,7 +36,7 @@ ap2-cli = "ap2.client.cli:main"
 vi-cli = "vi.client.cli:main"
 
 [project.urls]
-Repository = "https://github.com/anthropics/ARS"
+Repository = "https://github.com/t54-labs/AgenticRiskStandard"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
