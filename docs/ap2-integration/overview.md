@@ -16,7 +16,7 @@ AP2-ARS inherits all ARS protocol primitives through clean composition:
 
 The composite state machine bridges AP2 agreement fields to base ARS format (e.g., `merchant_pubkey` to `business_agent_pubkey`) and delegates base events to the ARS state machine while handling mandate events separately. Both results are merged into a unified job state view.
 
-14 HTTP endpoints are shared between the base ARS server and the AP2 server through a parameterized router factory. Only 5 endpoints with settlement-specific logic (job creation, fee lock/settle, collateral lock, principal release) are defined separately. AP2 adds 8 mandate-specific endpoints.
+12 HTTP endpoints are shared between the base ARS server and the AP2 server through a parameterized router factory. Only 6 endpoints with settlement-specific logic (job creation, fee lock/settle, premium payment, collateral lock, principal release) are defined separately. AP2 adds 8 mandate-specific endpoints.
 
 ## Key Design Decisions
 

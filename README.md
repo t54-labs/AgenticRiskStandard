@@ -52,7 +52,7 @@ When a human (or organization) delegates a task to an AI agent, both sides need 
 
 ### Roles
 
-ARS defines six participant roles. Each role is identified by an Ed25519 public key and can only perform specific actions:
+ARS defines five participant roles. Each role is identified by an Ed25519 public key and can only perform specific actions:
 
 | Role | Description |
 |------|-------------|
@@ -126,7 +126,7 @@ pytest tests/test_abstract_ars/ -v
 src/abstract_ars/
   models.py      # Pydantic models, enums (JobPhase, EventType, etc.)
   crypto.py      # Ed25519 signing, RFC 8785 canonicalization, SHA-256 hashing
-  routes.py      # Shared APIRouter factory (14 endpoints reused by ap2/)
+  routes.py      # Shared APIRouter factory (12 endpoints reused by ap2/ and vi/)
   server.py      # FastAPI app with override endpoints
   state.py       # Event-sourced state derivation + transition validation
   store.py       # SQLite append-only event store
@@ -418,7 +418,7 @@ To build a new realization of ARS (e.g., using a different payment rail or block
 1. **Import from `abstract_ars/`**: Use `SignedActionEnvelope`, `Event`, `EventStore`, `JobStateView`, `derive_job_state()`, `validate_transition()` directly
 2. **Define your agreement model**: Map your domain's actors to ARS roles via a bridging function (see `ap2/server/state.py:_to_base_agreement()`)
 3. **Extend `JobStateView`**: Add fields for your protocol-specific state
-4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `ap2/server/settlement.py`)
+4. **Implement `SettlementLayer`**: Wire your payment rail (the ABC is in `abstract_ars/settlement.py`)
 5. **Add new event types**: String-typed events pass through the base store/state unchanged; add your own state machine for domain-specific transitions
 
 ---
