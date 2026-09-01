@@ -6,9 +6,16 @@ The fee track manages the primary transaction through escrow. It is active in ev
 
 The fee track progresses through five states:
 
-```
-FEE_AWAIT_LOCK → FEE_ESCROW_LOCKED → FEE_DELIVERED → FEE_SETTLED_RELEASE
-                                                    → FEE_SETTLED_REFUND
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> FEE_AWAIT_LOCK: both parties sign
+    FEE_AWAIT_LOCK --> FEE_ESCROW_LOCKED: requestor locks fee
+    FEE_ESCROW_LOCKED --> FEE_DELIVERED: agent submits deliverable
+    FEE_DELIVERED --> FEE_SETTLED_RELEASE: verdict pass → release to agent
+    FEE_DELIVERED --> FEE_SETTLED_REFUND: verdict fail → refund to requestor
+    FEE_SETTLED_RELEASE --> [*]
+    FEE_SETTLED_REFUND --> [*]
 ```
 
 **FEE_AWAIT_LOCK** is the initial state after both parties sign the agreement. The requestor must lock the fee before any work begins.

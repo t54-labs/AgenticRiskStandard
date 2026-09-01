@@ -57,38 +57,72 @@ Two enforcement gates connect the mandate layer to the settlement layer:
 
 ## Flow Diagram
 
-```
-User creates job → User + Merchant sign agreement
-                           ↓
-User: IntentMandate → Merchant: CartMandate → Merchant: sign cart
-                           ↓
-[human-present: User approves cart]  OR  [human-not-present: constraint check]
-                           ↓
-CredProvider: PaymentMandate → User/CredProvider: sign payment
-                           ↓
-                    PAYMENT_SIGNED (mandate complete)
-                           ↓
-User: lock fee (amount = cart total, payee = merchant)
-                           ↓
-Merchant: deliver goods → Evaluator: pass/fail
-                           ↓
-User: settle fee → CLOSED (release to merchant or refund to user)
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant SA as Shopping Agent
+    participant M as Merchant
+    participant CP as Credentials Provider
+    participant S as ARS Server
+    actor E as Evaluator
+
+    U->>S: create job (6 actors, modality, fee/principal terms)
+    Note over S: firewall check:<br/>agent key ≠ credentials provider / payment processor
+    U->>S: AGREEMENT_SIGNED
+    M->>S: AGREEMENT_SIGNED
+    Note over S: phase = TRANSACTION
+
+    rect rgb(238, 243, 252)
+        Note over U,CP: Authorization — mandate track
+        U->>S: IntentMandate (budget, merchants, SKUs, TTL, requires_principal)
+        SA->>M: negotiate cart
+        M->>S: CartMandate proposed, then signed
+        alt human-present
+            U->>S: CART_APPROVED_BY_USER
+        else human-not-present
+            S->>S: constraint engine validates budget / whitelist / SKU / TTL
+        end
+        CP->>S: PaymentMandate (references cart hash)
+        U-->>S: PAYMENT_MANDATE_SIGNED (human-present)
+        CP-->>S: PAYMENT_MANDATE_SIGNED (human-not-present)
+        Note over S: mandate track = PAYMENT_SIGNED
+    end
+
+    rect rgb(240, 248, 240)
+        Note over U,E: Settlement — fee track
+        U->>S: lock fee (amount = cart total, payee = merchant)
+        M->>S: deliver goods (deliverable_ref)
+        E->>S: verdict pass / fail
+        U->>S: settle fee
+        Note over S: pass → release to merchant<br/>fail → refund to user<br/>phase = CLOSED
+    end
 ```
 
 With principal track:
 
-```
-                    PAYMENT_SIGNED
-                           ↓
-              ┌────────────┴────────────┐
-              ↓                         ↓
-    User: lock fee              Merchant: request UW
-              ↓                         ↓
-    Merchant: deliver          UW: decide (premium, collateral)
-              ↓                         ↓
-    Evaluator: verdict         User: pay premium / Merchant: lock collateral
-              ↓                         ↓
-    User: settle fee           Auto-RELEASABLE → principal release
-              ↓                         ↓
-           CLOSED              Collateral auto-handled at fee settlement
+```mermaid
+flowchart TD
+    PS([PAYMENT_SIGNED — mandate complete])
+    PS --> F1[User: lock fee]
+    PS --> P1[Merchant: request UW]
+
+    subgraph fee [Fee track]
+        direction TB
+        F1 --> F2[Merchant: deliver goods]
+        F2 --> F3[Evaluator: pass / fail verdict]
+        F3 --> F4[User: settle fee]
+        F4 --> F5([CLOSED])
+    end
+
+    subgraph principal [Principal track]
+        direction TB
+        P1 --> P2[Underwriter: decide premium + collateral]
+        P2 --> P3[User: pay premium<br/>Merchant: lock collateral]
+        P3 --> P4([RELEASABLE — automatic])
+        P4 --> P5[Settlement layer: release principal]
+        P5 --> P6[Merchant: submit execution evidence]
+    end
+
+    F4 -. collateral resolved in the same operation<br/>release → unlock, refund → slash .-> P3
 ```
