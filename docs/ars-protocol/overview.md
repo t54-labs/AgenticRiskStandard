@@ -42,6 +42,8 @@ Two concrete implementations are provided:
 
 ## Further Reading
 
+- [Protocol Landscape](../protocol-landscape.md) for how ARS relates to AP2, Verifiable Intent,
+  Visa's Trusted Agent Protocol, ACP, UCP, and MPP
 - [Fee Track](fee-track.md) for the escrow lifecycle
 - [Principal Track](principal-track.md) for underwriting and collateral
 - [State Machine](state-machine.md) for phases and transition rules
