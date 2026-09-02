@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use the Agentic Risk Standard (ARS) in your research, please cite the paper below."
+title: "Agentic Risk Standard"
+repository-code: "https://github.com/t54-labs/AgenticRiskStandard"
+license: Apache-2.0
+abstract: "A settlement-layer protocol for trustworthy AI agent services: cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks."
+authors:
+  - name: "t54 Labs"
+    website: "https://t54.ai"
+preferred-citation:
+  type: article
+  title: "Quantifying Trust: Financial Risk Management for Trustworthy AI Agents"
+  authors:
+    - family-names: "Hua"
+      given-names: "Wenyue"
+    - family-names: "Peng"
+      given-names: "Tianyi"
+    - family-names: "Wang"
+      given-names: "Chi"
+    - family-names: "Pei"
+      given-names: "Jiaxin"
+    - family-names: "Kaufman"
+      given-names: "Ian"
+    - family-names: "Lim"
+      given-names: "Bryan"
+    - family-names: "Fang"
+      given-names: "Chandler"
+  year: 2026
+  journal: "arXiv preprint"
+  doi: "10.48550/arXiv.2604.03976"
+  url: "https://arxiv.org/abs/2604.03976"
