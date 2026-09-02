@@ -596,3 +596,18 @@ Settlement rules: `pass` verdict requires `release` action; `fail` verdict requi
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+## Citation
+
+ARS implements the framework introduced in [Quantifying Trust: Financial Risk Management for Trustworthy AI Agents](https://arxiv.org/abs/2604.03976) (arXiv:2604.03976). If you use ARS in your research, please cite:
+
+```bibtex
+@article{hua2026quantifyingtrust,
+  title   = {Quantifying Trust: Financial Risk Management for Trustworthy AI Agents},
+  author  = {Hua, Wenyue and Peng, Tianyi and Wang, Chi and Pei, Jiaxin and Kaufman, Ian and Lim, Bryan and Fang, Chandler},
+  journal = {arXiv preprint arXiv:2604.03976},
+  year    = {2026},
+  doi     = {10.48550/arXiv.2604.03976},
+  url     = {https://arxiv.org/abs/2604.03976}
+}
+```
