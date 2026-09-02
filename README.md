@@ -6,6 +6,11 @@
   <img width="607" height="388" alt="Screenshot 2026-03-29 at 12 55 39 AM" src="https://github.com/user-attachments/assets/30a39b4c-95c4-4c8c-bc69-ec184ee1ec78" />
 </p>
 
+<p align="center">
+  <a href="https://arxiv.org/abs/2604.03976"><img src="https://img.shields.io/badge/arXiv-2604.03976-b31b1b.svg" alt="arXiv:2604.03976"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
+</p>
+
 
 A settlement-layer protocol for trustworthy AI agent services. ARS provides cryptographically signed, event-sourced job lifecycle management with fee escrow, underwriting, and principal release tracks.
 
